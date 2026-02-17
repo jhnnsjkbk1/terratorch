@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 from einops import repeat
 
-from terramind.models.tm_utils import (
+from terratorch.models.backbones.terramind.model.tm_utils import (
     build_1d_sincos_posemb,
     build_2d_sincos_posemb,
     pair,
