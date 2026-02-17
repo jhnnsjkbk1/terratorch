@@ -340,7 +340,8 @@ class TerraMindGeneration(nn.Module):
                 tok = rearrange(tok, "b (nh nw) -> b nh nw",
                                 nh=image_size[0] // patch_size, nw=image_size[1] // patch_size)
 
-                # To Do: Remove this. Was a minimal patch to see if code is working
+                # TODO: Remove this. Was a minimal patch to see if code is working
+                print("[Warn] Repeating to artificially add num_codebook dimension")
                 tok = tok.repeat(128, 1, 1)
 
                 out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
