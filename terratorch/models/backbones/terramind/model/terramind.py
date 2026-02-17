@@ -58,6 +58,7 @@ class TerraMind(nn.Module):
         num_register_tokens (int): Number of register tokens.
         use_act_checkpoint (bool): If True, use activation checkpoint for each block.
     """
+
     def __init__(self,
                  encoder_embeddings: dict[str, nn.Module],
                  decoder_embeddings: dict[str, nn.Module],
@@ -75,7 +76,7 @@ class TerraMind(nn.Module):
                  shared_drop_path: bool = False,
                  act_layer: nn.Module = nn.GELU,
                  norm_layer: partial | nn.Module = partial(LayerNorm, eps=1e-6),
-                 gated_mlp: bool = False, # Make the feedforward gated for e.g. SwiGLU
+                 gated_mlp: bool = False,  # Make the feedforward gated for e.g. SwiGLU
                  qk_norm: bool = False,
                  decoder_causal_mask: bool = False,
                  decoder_sep_mask: bool = True,
@@ -92,7 +93,6 @@ class TerraMind(nn.Module):
         self.init_std = 0.02
         self.use_act_checkpoint = use_act_checkpoint
         self.num_register_tokens = num_register_tokens
-
 
         # Encoder embeddings & init
         self.encoder_modalities = set(encoder_embeddings.keys())
@@ -112,30 +112,37 @@ class TerraMind(nn.Module):
 
         ## Transformer encoder
         if shared_drop_path:
-            dpr_encoder = [x.item() for x in torch.linspace(0, drop_path_rate_encoder, encoder_depth + decoder_depth)][:encoder_depth]
+            dpr_encoder = [x.item() for x in torch.linspace(0, drop_path_rate_encoder, encoder_depth + decoder_depth)][
+                :encoder_depth]
         else:
-            dpr_encoder = [x.item() for x in torch.linspace(0, drop_path_rate_encoder, encoder_depth)] # stochastic depth decay rule
+            dpr_encoder = [x.item() for x in
+                           torch.linspace(0, drop_path_rate_encoder, encoder_depth)]  # stochastic depth decay rule
 
         self.encoder = nn.ModuleList([
-            Block(dim=dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, proj_bias=proj_bias, mlp_bias=mlp_bias,
-                 drop_path=dpr_encoder[i], act_layer=act_layer, norm_layer=norm_layer, gated_mlp=gated_mlp, qk_norm=qk_norm)
+            Block(dim=dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, proj_bias=proj_bias,
+                  mlp_bias=mlp_bias,
+                  drop_path=dpr_encoder[i], act_layer=act_layer, norm_layer=norm_layer, gated_mlp=gated_mlp,
+                  qk_norm=qk_norm)
             for i in range(encoder_depth)
         ])
         self.encoder_norm = norm_layer(dim)
 
-
         ## Transformer decoder
         if shared_drop_path:
-            dpr_decoder = [x.item() for x in torch.linspace(0, drop_path_rate_decoder, encoder_depth + decoder_depth)][encoder_depth:]
+            dpr_decoder = [x.item() for x in torch.linspace(0, drop_path_rate_decoder, encoder_depth + decoder_depth)][
+                encoder_depth:]
         else:
-            dpr_decoder = [x.item() for x in torch.linspace(0, drop_path_rate_decoder, decoder_depth)]  # stochastic depth decay rule
+            dpr_decoder = [x.item() for x in
+                           torch.linspace(0, drop_path_rate_decoder, decoder_depth)]  # stochastic depth decay rule
 
         # Projection of encoder tokens before adding the embeddings again
         self.decoder_proj_context = nn.Linear(dim, dim)
 
         self.decoder = nn.ModuleList([
-            DecoderBlock(dim=dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, proj_bias=proj_bias, mlp_bias=mlp_bias, 
-                         drop_path=dpr_decoder[i], act_layer=act_layer, norm_layer=norm_layer, gated_mlp=gated_mlp, qk_norm=qk_norm)
+            DecoderBlock(dim=dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, proj_bias=proj_bias,
+                         mlp_bias=mlp_bias,
+                         drop_path=dpr_decoder[i], act_layer=act_layer, norm_layer=norm_layer, gated_mlp=gated_mlp,
+                         qk_norm=qk_norm)
             for i in range(decoder_depth)
         ])
         self.decoder_norm = norm_layer(dim)
@@ -226,8 +233,8 @@ class TerraMind(nn.Module):
         """Concatenate encoder tensors from different modalities.
 
         Args:
-            mod_dict (dict): A dictionary containing information for each modality. 
-                             Expected keys for each modality are 'x' (input tokens), 
+            mod_dict (dict): A dictionary containing information for each modality.
+                             Expected keys for each modality are 'x' (input tokens),
                              'emb' (embeddings), 'input_mask', etc.
 
         Returns:
@@ -296,7 +303,7 @@ class TerraMind(nn.Module):
 
         # Shuffle order in which modalities are provided (useful for modality causal mask)
         mod_dict = {mod: d for mod, d in random.sample([item for item in mod_dict.items()], len(mod_dict))}
-        
+
         for mod, d in mod_dict.items():
             if self.modality_info[mod]['type'] in ['seq', 'seq_emb', 'seq_token']:
                 # Important: This makes the assumption that the target sequence appears sequentially
@@ -327,20 +334,21 @@ class TerraMind(nn.Module):
 
         return decoder_tokens_all, emb_all, decoder_mask_all, target_ids_all, attention_mask_all, mod_mask_all
 
-    def forward_mask_encoder(self, mod_dict: dict[str, dict[str, torch.Tensor]], num_encoder_tokens: int) -> tuple[torch.Tensor]:
+    def forward_mask_encoder(self, mod_dict: dict[str, dict[str, torch.Tensor]], num_encoder_tokens: int) -> tuple[
+        torch.Tensor]:
         """Concatenates and mask encoder tensors based on provided modality information.
 
         This function consolidates encoder tokens from multiple modalities, then selects a specified number of them based on modality information (i.e. masking).
 
         Args:
-            mod_dict (dict): dictionary containing tensors for different modalities. 
-                            It is expected to have keys for each modality and values 
+            mod_dict (dict): dictionary containing tensors for different modalities.
+                            It is expected to have keys for each modality and values
                             containing the modalities' associated tensors.
             num_encoder_tokens (int): Number of encoder tokens to retain after masking.
 
         Returns:
             tuple[torch.Tensor]:
-                (torch.Tensor) **Selected encoder tokens from all modalities**. Shape (B, N, D) where N is the number of selected encoder tokens. 
+                (torch.Tensor) **Selected encoder tokens from all modalities**. Shape (B, N, D) where N is the number of selected encoder tokens.
                 (torch.Tensor) **Corresponding embeddings for encoder tokens**.
                 Shape (B, N, D).
                 (torch.Tensor) **A boolean mask indicating which encoder tokens
@@ -373,8 +381,12 @@ class TerraMind(nn.Module):
             # We add register tokens at the beginning of the sequence
             encoder_tokens = torch.cat([register_tokens, encoder_tokens], dim=1)
             encoder_emb = torch.cat([torch.zeros_like(register_tokens), encoder_emb], dim=1)
-            encoder_mask = torch.cat([torch.zeros((B, register_tokens.shape[1]), dtype=torch.bool, device=encoder_mask.device), encoder_mask], dim=1)
-            mod_mask = torch.cat([torch.full((B, register_tokens.shape[1]), -1, dtype=torch.int, device=mod_mask.device), mod_mask], dim=1)
+            encoder_mask = torch.cat(
+                [torch.zeros((B, register_tokens.shape[1]), dtype=torch.bool, device=encoder_mask.device),
+                 encoder_mask], dim=1)
+            mod_mask = torch.cat(
+                [torch.full((B, register_tokens.shape[1]), -1, dtype=torch.int, device=mod_mask.device), mod_mask],
+                dim=1)
 
         encoder_tokens[encoder_mask] = 0.
         encoder_emb[encoder_mask] = 0.
@@ -385,14 +397,15 @@ class TerraMind(nn.Module):
 
         return encoder_tokens, encoder_emb, encoder_mask, mod_mask
 
-    def forward_mask_decoder(self, mod_dict: dict[str, dict[str, torch.Tensor]], num_decoder_tokens: int) -> tuple[torch.Tensor]:
+    def forward_mask_decoder(self, mod_dict: dict[str, dict[str, torch.Tensor]], num_decoder_tokens: int) -> tuple[
+        torch.Tensor]:
         """Concatenates and mask decoder tensors based on provided modality information.
 
         This function consolidates decoder tokens from multiple modalities, selects a specified number of them based on modality information, and applies appropriate masking.
 
         Args:
             mod_dict (dict): dictionary containing tensors for different modalities.
-                            It is expected to have keys for each modality and values 
+                            It is expected to have keys for each modality and values
                             containing the modalities' associated tensors.
             num_decoder_tokens (int): Number of decoder tokens to retain after masking.
 
@@ -413,7 +426,8 @@ class TerraMind(nn.Module):
                 tokens)**. Shape (B, M).
         """
         # decoder_mask and target_mask are equivalent, we rename it here to harmonize with forward_mask_encoder
-        decoder_tokens_all, emb_all, decoder_mask_all, target_ids_all, decoder_attention_mask_all, mod_mask_all = self.cat_decoder_tensors(mod_dict)
+        decoder_tokens_all, emb_all, decoder_mask_all, target_ids_all, decoder_attention_mask_all, mod_mask_all = self.cat_decoder_tensors(
+            mod_dict)
 
         # Add arange multiplied by small constant to mask so they get sorted in a deterministic way
         mask_arange = torch.arange(decoder_mask_all.shape[1], device=decoder_mask_all.device).unsqueeze(0) * 1e-6
@@ -421,7 +435,8 @@ class TerraMind(nn.Module):
         # ids_restore = torch.argsort(ids_shuffle, dim=1)
         ids_keep = ids_shuffle[:, :num_decoder_tokens]
 
-        decoder_tokens = torch.gather(decoder_tokens_all, dim=1, index=repeat(ids_keep, "b n -> b n d", d=decoder_tokens_all.shape[2]))
+        decoder_tokens = torch.gather(decoder_tokens_all, dim=1,
+                                      index=repeat(ids_keep, "b n -> b n d", d=decoder_tokens_all.shape[2]))
         decoder_emb = torch.gather(emb_all, dim=1, index=repeat(ids_keep, "b n -> b n d", d=emb_all.shape[2]))
         decoder_mask = torch.gather(decoder_mask_all, dim=1, index=ids_keep)
         target_ids = torch.gather(target_ids_all, dim=1, index=ids_keep)
@@ -436,7 +451,6 @@ class TerraMind(nn.Module):
 
         # This means this mask can then be re-used for decoder cross-attention
         decoder_mask = rearrange(decoder_mask, 'b n2 -> b 1 n2')
-
 
         return decoder_tokens, decoder_emb, decoder_mask, target_ids, decoder_attention_mask, mod_mask
 
@@ -478,30 +492,30 @@ class TerraMind(nn.Module):
 
         return adapted_attention_mask
 
-    def forward_encoder(self, 
-                        x: torch.Tensor, 
+    def forward_encoder(self,
+                        x: torch.Tensor,
                         encoder_mask: torch.Tensor) -> torch.Tensor:
         """Forward pass for the encoder.
-        
+
         Args:
             x (torch.Tensor): Encoder input tokens. Shape (B, N, D) where N is the number of encoder tokens.
             encoder_mask (torch.Tensor): Encoder mask indicating which tokens are valid (set to 0 for valid tokens, 1 otherwise). Shape (B, 1, N)
-            
+
         Returns:
             torch.Tensor: Encoder output. Shape (B, N, D)
         """
 
         for blk in self.encoder:
             x = blk(x, mask=encoder_mask)
-            
+
         x = self.encoder_norm(x)
 
         return x
 
-    def forward_decoder(self, 
-                        y: torch.Tensor, 
-                        context: torch.Tensor, 
-                        encoder_mask: torch.Tensor, 
+    def forward_decoder(self,
+                        y: torch.Tensor,
+                        context: torch.Tensor,
+                        encoder_mask: torch.Tensor,
                         decoder_attention_mask: torch.Tensor) -> torch.Tensor:
         """Forward pass for the decoder.
 
@@ -522,9 +536,9 @@ class TerraMind(nn.Module):
 
         return y
 
-    def forward_logits(self, 
-                       y: torch.Tensor, 
-                       decoder_mod_dict: dict[str, dict[str, torch.Tensor]], 
+    def forward_logits(self,
+                       y: torch.Tensor,
+                       decoder_mod_dict: dict[str, dict[str, torch.Tensor]],
                        decoder_mod_mask: torch.Tensor,
                        return_all_logits: bool = False) -> dict[str, torch.Tensor]:
         """Forward computation of logits for each modality.
@@ -548,10 +562,10 @@ class TerraMind(nn.Module):
             mod_logits[mod] = logits
         return mod_logits
 
-    def forward_loss(self, 
-                     y: torch.Tensor, 
-                     target_ids: torch.Tensor, 
-                     decoder_mod_dict: dict[str, type], 
+    def forward_loss(self,
+                     y: torch.Tensor,
+                     target_ids: torch.Tensor,
+                     decoder_mod_dict: dict[str, type],
                      decoder_mod_mask: torch.Tensor, loss_type: str) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Computes the loss based on the specified loss type.
 
@@ -574,10 +588,10 @@ class TerraMind(nn.Module):
 
         return loss, mod_loss
 
-    def forward_mod_loss(self, 
-                         y: torch.Tensor, 
-                         target_ids: torch.Tensor, 
-                         decoder_mod_dict: dict[str, type], 
+    def forward_mod_loss(self,
+                         y: torch.Tensor,
+                         target_ids: torch.Tensor,
+                         decoder_mod_dict: dict[str, type],
                          decoder_mod_mask: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Computes the modality-wise loss.
 
@@ -589,7 +603,7 @@ class TerraMind(nn.Module):
 
         Returns:
             tuple[torch.Tensor, dict[str, torch.Tensor]]: Total modality loss and dictionary of loss for each modality.
-        """       
+        """
         mod_loss = {}
         for mod, d in decoder_mod_dict.items():
             idx = self.modality_info[mod]["id"]
@@ -605,10 +619,10 @@ class TerraMind(nn.Module):
 
         return loss, mod_loss
 
-    def forward_token_loss(self, 
-                           y: torch.Tensor, 
-                           target_ids: torch.Tensor, 
-                           decoder_mod_dict: dict[str, type], 
+    def forward_token_loss(self,
+                           y: torch.Tensor,
+                           target_ids: torch.Tensor,
+                           decoder_mod_dict: dict[str, type],
                            decoder_mod_mask: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Computes the token-wise loss.
 
@@ -620,7 +634,7 @@ class TerraMind(nn.Module):
 
         Returns:
             tuple[torch.Tensor, dict[str, torch.Tensor]]: Total token loss and dictionary of loss for each modality.
-        """        
+        """
         mod_loss = {}
         mod_count = {}
 
@@ -640,13 +654,12 @@ class TerraMind(nn.Module):
 
         return loss, mod_loss
 
-
-    def forward(self, 
-            mod_dict: dict[str, dict[str, torch.Tensor]], 
-            num_encoder_tokens: int, 
-            num_decoder_tokens: int, 
-            loss_type: str = 'mod', 
-            return_logits: bool = False) -> dict[str, torch.Tensor] | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    def forward(self,
+                mod_dict: dict[str, dict[str, torch.Tensor]],
+                num_encoder_tokens: int,
+                num_decoder_tokens: int,
+                loss_type: str = 'mod',
+                return_logits: bool = False) -> dict[str, torch.Tensor] | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """
         Forward pass for the model.
 
@@ -660,18 +673,20 @@ class TerraMind(nn.Module):
 
         Returns:
             Union[dict, tuple]: If return_logits is True, dictionary of logits for each modality. Otherwise, tuple containing the total loss and dictionary of loss for each modality.
-        """        
+        """
         # Mod dicts
         encoder_mod_dict = {mod: self.encoder_embeddings[mod](d)
                             for mod, d in mod_dict.items()
                             if mod in self.encoder_embeddings}
-        encoder_tokens, encoder_emb, encoder_mask, encoder_mod_mask = self.forward_mask_encoder(encoder_mod_dict, num_encoder_tokens)
+        encoder_tokens, encoder_emb, encoder_mask, encoder_mod_mask = self.forward_mask_encoder(encoder_mod_dict,
+                                                                                                num_encoder_tokens)
 
         decoder_mod_dict = {mod: self.decoder_embeddings[mod].forward_embed(d)
                             for mod, d in mod_dict.items()
-                            if mod in self.decoder_embeddings}  
-        decoder_tokens, decoder_emb, decoder_mask, target_ids, decoder_attention_mask, decoder_mod_mask = self.forward_mask_decoder(decoder_mod_dict, num_decoder_tokens)
-        
+                            if mod in self.decoder_embeddings}
+        decoder_tokens, decoder_emb, decoder_mask, target_ids, decoder_attention_mask, decoder_mod_mask = self.forward_mask_decoder(
+            decoder_mod_dict, num_decoder_tokens)
+
         # Encoder
         x = encoder_tokens + encoder_emb
         x = self.forward_encoder(x, encoder_mask=encoder_mask)
@@ -690,7 +705,6 @@ class TerraMind(nn.Module):
         loss, mod_loss = self.forward_loss(y, target_ids, decoder_mod_dict, decoder_mod_mask, loss_type)
 
         return loss, mod_loss
-
 
     def freeze_encoder(self, freeze_embeddings=True):
         for param in self.encoder.parameters():

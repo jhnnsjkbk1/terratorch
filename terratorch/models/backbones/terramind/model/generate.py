@@ -34,7 +34,7 @@ from collections import defaultdict
 def get_sentinel_to_id_mapping(tokenizer, match_str="[S_"):
     sentinel_tokens = {k: v for k, v in tokenizer.get_vocab().items() if k.startswith(match_str)}
     # Extract the sentinel token id, the id is of the form "[S_0]", "[S_1]", etc.
-    sentinel_to_id = {int(k.split("_")[1][:-1]): v for k, v in sorted(sentinel_tokens.items(), key=lambda x:x[1])}
+    sentinel_to_id = {int(k.split("_")[1][:-1]): v for k, v in sorted(sentinel_tokens.items(), key=lambda x: x[1])}
     return sentinel_to_id
 
 
@@ -104,11 +104,12 @@ def linear_temp_schedule(temp, token_schedule):
 def empty_img_modality(mod_dict, key):
     # Input mask
     mod_dict[key]['input_mask'][:] = True
-    
+
     # Target Mask
     mod_dict[key]['target_mask'][:] = False
-    
+
     return mod_dict
+
 
 def empty_seq_modality(mod_dict, s1_id=5):
     # To create an empty sequence, we suppose an input budget of 1, and the rest assigned to targets
@@ -117,14 +118,14 @@ def empty_seq_modality(mod_dict, s1_id=5):
     # Input is [S_1], target is [S_1] ...... [S_2]
     # (so [S_1] [S_1] ..... [S_2] when combined)
     mod_dict['tensor'][:] = 0
-    mod_dict['tensor'][:,[0,1]] = s1_id  # s1_id is id of the first sentinel token ([S_1])
-    mod_dict['tensor'][:,-1] = s1_id + 1
+    mod_dict['tensor'][:, [0, 1]] = s1_id  # s1_id is id of the first sentinel token ([S_1])
+    mod_dict['tensor'][:, -1] = s1_id + 1
 
     # Input mask
     # Set first token to input (i.e. 0), rest to target (i.e. 1)
     mod_dict['input_mask'][:] = True
-    mod_dict['input_mask'][:,0] = False
-    
+    mod_dict['input_mask'][:, 0] = False
+
     # Target Mask
     mod_dict['target_mask'] = ~mod_dict['input_mask']
 
@@ -136,16 +137,17 @@ def empty_seq_modality(mod_dict, s1_id=5):
 
     return mod_dict
 
+
 def empty_seq_emb_modality(mod_dict):
     # It is crucial to specify the input mask as such, CFG won't work otherwise!
     mod_dict['input_mask'][:, 0] = False
     return mod_dict
-    
+
 
 def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, device, s1_id=5):
     """
-    Initializes an empty target modality dictionary for a given domain. 
-    Used to initialize target modality dictionaries for generation. 
+    Initializes an empty target modality dictionary for a given domain.
+    Used to initialize target modality dictionaries for generation.
     """
     if modality_info[domain]['type'] == 'img':
         # Initialize mod dict
@@ -170,8 +172,9 @@ def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, de
             mod_dict = empty_seq_emb_modality(mod_dict)
     else:
         raise ValueError()
-        
+
     return mod_dict
+
 
 def init_conditioned_target_modality(mod_dict, modality_info, domain, num_target_tokens, eos_id=3, s1_id=5):
     batch_size, input_length = mod_dict["tensor"].shape[:2]
@@ -205,11 +208,11 @@ def init_conditioned_target_modality(mod_dict, modality_info, domain, num_target
             eos_idx = eos_indices[i]
             # Update input tensor
             # Input is [S_1], target is [S_1] ...... [S_2] (so Input [S_1] [S_1] ..... [S_2] when combined)
-            mod_dict['tensor'][i, [eos_idx, eos_idx+1]] = s1_id
+            mod_dict['tensor'][i, [eos_idx, eos_idx + 1]] = s1_id
             mod_dict['tensor'][i, -1] = s1_id + 1
 
-            mod_dict['input_mask'][i, :eos_idx+1] = False
-            mod_dict['input_mask'][i, eos_idx+1:] = True
+            mod_dict['input_mask'][i, :eos_idx + 1] = False
+            mod_dict['input_mask'][i, eos_idx + 1:] = True
         mod_dict['target_mask'] = ~mod_dict['input_mask']
         mod_dict["decoder_attention_mask"] = mod_dict['input_mask']
 
@@ -241,10 +244,10 @@ def init_full_input_modality(value, modality_info, domain, device, eos_id=3):
             eos_idx = torch.where(mod_dict['tensor'] == eos_id)[1][0].item()
         else:
             warnings.warn(f'Cannot find EOS token in {domain} input, ignoring input.')
-            mod_dict['tensor'][:,0] = eos_id
+            mod_dict['tensor'][:, 0] = eos_id
             eos_idx = 0
-        mod_dict['input_mask'][:,:eos_idx+1] = False
-        mod_dict['input_mask'][:,eos_idx+1:] = True
+        mod_dict['input_mask'][:, :eos_idx + 1] = False
+        mod_dict['input_mask'][:, eos_idx + 1:] = True
         mod_dict['target_mask'][:] = True
 
     elif modality_info[domain]['type'] in ['seq_emb']:
@@ -252,8 +255,9 @@ def init_full_input_modality(value, modality_info, domain, device, eos_id=3):
         mod_dict['input_mask'] = ~mod_dict['mask_valid']
         mod_dict['target_mask'] = torch.ones_like(mod_dict['mask_valid'])
         mod_dict['decoder_attention_mask'] = torch.zeros_like(mod_dict['mask_valid'])
-        
+
     return mod_dict
+
 
 def custom_text(input_text, device, text_tokenizer, target_max_len=50, start_token="[S_1]", eos_token="[EOS]"):
     input_ids = text_tokenizer.encode(input_text).ids
@@ -269,14 +273,14 @@ def custom_text(input_text, device, text_tokenizer, target_max_len=50, start_tok
     all_ids = torch.cat([input_ids, target_ids], dim=1)
 
     input_mask = torch.cat([
-        torch.zeros_like(input_ids, dtype=torch.bool), 
+        torch.zeros_like(input_ids, dtype=torch.bool),
         torch.ones_like(target_ids, dtype=torch.bool),
-        ], dim=1)
+    ], dim=1)
 
     target_mask = torch.cat([
-        torch.ones_like(input_ids, dtype=torch.bool), 
+        torch.ones_like(input_ids, dtype=torch.bool),
         torch.zeros_like(target_ids, dtype=torch.bool),
-        ], dim=1)
+    ], dim=1)
 
     mod_dict = {}
     mod_dict['tensor'] = all_ids.to(device)
@@ -288,19 +292,19 @@ def custom_text(input_text, device, text_tokenizer, target_max_len=50, start_tok
 
 
 def build_chained_generation_schedules(
-        cond_domains: list[str], 
+        cond_domains: list[str],
         target_domains: list[str],
         tokens_per_target: list[int],
-        autoregression_schemes: list[str], 
-        decoding_steps: list[int], 
+        autoregression_schemes: list[str],
+        decoding_steps: list[int],
         token_decoding_schedules: list[str],
         temps: list[float],
         temp_schedules: list[str],
-        cfg_scales: list[float], 
+        cfg_scales: list[float],
         cfg_schedules: list[str],
-        cfg_grow_conditioning: bool = False, 
+        cfg_grow_conditioning: bool = False,
         modality_info: dict | None = None,
-    ):
+):
     """
     Builds a list of chained generation schedules, where each schedule is a tuple of the form:
     (target_modality, schema, number of decoded tokens, temperature, guidance_scale, cfg_cond_domains)
@@ -319,14 +323,14 @@ def build_chained_generation_schedules(
         cfg_grow_conditioning: After every completed modality, add them to classifier-free guidance conditioning
         modality_info: Dictionary with metadata for each modality, optionally used to verify that the schedule is compatible with the modality
     """
-    
+
     # list of {target_modality, schema, number of decoded tokens, temperature, guidance_scale, cfg_cond_domains} dicts
     chained_schedules = []
-    
+
     cond_domains = cond_domains.copy()
-    
+
     for target_idx in range(len(target_domains)):
-        
+
         scheme = autoregression_schemes[target_idx]
         target_domain = target_domains[target_idx]
         ntoks = tokens_per_target[target_idx]
@@ -350,7 +354,8 @@ def build_chained_generation_schedules(
 
         # Use modality info for (optional) assert if provided
         if modality_info is not None:
-            assert modality_info[target_domain]['type'] not in ['seq', 'seq_token'], f'Illegal autoregressive scheme {scheme} for target domain {target_domain}'
+            assert modality_info[target_domain]['type'] not in ['seq',
+                                                                'seq_token'], f'Illegal autoregressive scheme {scheme} for target domain {target_domain}'
 
         # Token schedule
         if scheme == 'maskgit':
@@ -364,11 +369,11 @@ def build_chained_generation_schedules(
                 raise ValueError(f'Illegal MaskGIT token schedule {maskgit_token_schedule_name}')
         elif scheme == 'roar':
             # ROAR token schedule setup (one-by-one, but random order)
-            num_steps = decoding_steps[target_idx]            
+            num_steps = decoding_steps[target_idx]
             token_schedule = linear_schedule(num_steps, ntoks)
         else:
             raise ValueError(f'Illegal decoding scheme {scheme}')
-        
+
         # Temperature schedule
         if temp_schedule_name == 'linear':
             temp_schedule = linear_temp_schedule(temp, token_schedule)
@@ -405,11 +410,11 @@ def build_chained_generation_schedules(
             for tok, temp, cfg in zip(token_schedule, temp_schedule, cfg_schedule)
         ]
         chained_schedules.extend(schedule)
-        
+
         # Optionally add this new modality to the ones affected by classifier-free guidance
         if cfg_grow_conditioning:
             cond_domains.append(target_domain)
-            
+
     return chained_schedules
 
 
@@ -420,7 +425,6 @@ class GenerationSampler(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
-
 
     def top_k_top_p_filtering(self, logits, top_k=0.0, top_p=0.0):
         # Compatible with batching
@@ -462,7 +466,7 @@ class GenerationSampler(nn.Module):
             samples = torch.multinomial(probs, 1)[:, 0]
             sampled_probs = probs[torch.arange(len(samples)), samples]
         return samples, sampled_probs
-    
+
     def sample_tokens_batched(self, logits, temperature=1.0, top_k=0.0, top_p=0.0):
         if logits.ndim > 2:
             B, N = logits.shape[0], logits.shape[1]
@@ -482,20 +486,21 @@ class GenerationSampler(nn.Module):
             return top_samples, top_indices, samples
         else:
             return top_samples, top_indices
-        
-    def select_tokens_batched(self, logits, num_select, temperature=1.0, top_k=0.0, top_p=0.0, return_all_samples=False):
-            if logits.ndim > 2:
-                samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k, top_p) # both of shape (B, N)
-                top_indices = torch.topk(sampled_probs, num_select, dim=-1)[1]
-                # Need to switch to gather instead of indexing here
-                top_samples = torch.gather(samples, dim=-1, index=top_indices)
-                if return_all_samples:
-                    return top_samples, top_indices, samples
-                else:
-                    return top_samples, top_indices
-            else:
-                return self.sample_tokens(logits, num_select, temperature, top_k, top_p, return_all_samples)
 
+    def select_tokens_batched(self, logits, num_select, temperature=1.0, top_k=0.0, top_p=0.0,
+                              return_all_samples=False):
+        if logits.ndim > 2:
+            samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k,
+                                                                top_p)  # both of shape (B, N)
+            top_indices = torch.topk(sampled_probs, num_select, dim=-1)[1]
+            # Need to switch to gather instead of indexing here
+            top_samples = torch.gather(samples, dim=-1, index=top_indices)
+            if return_all_samples:
+                return top_samples, top_indices, samples
+            else:
+                return top_samples, top_indices
+        else:
+            return self.sample_tokens(logits, num_select, temperature, top_k, top_p, return_all_samples)
 
     def forward_mask_encoder_generation(self, encoder_mod_dict):
         """Modification of forward_mask_encoder adapted for generation, with support for batching
@@ -524,8 +529,12 @@ class GenerationSampler(nn.Module):
             # We add prompt tokens at the beginning of the sequence
             encoder_tokens = torch.cat([register_tokens, encoder_tokens], dim=1)
             encoder_emb = torch.cat([torch.zeros_like(register_tokens), encoder_emb], dim=1)
-            encoder_mask = torch.cat([torch.zeros((B, register_tokens.shape[1]), dtype=torch.bool, device=encoder_mask.device), encoder_mask], dim=1)
-            mod_mask = torch.cat([torch.full((B, register_tokens.shape[1]), -1, dtype=torch.int, device=mod_mask.device), mod_mask], dim=1)
+            encoder_mask = torch.cat(
+                [torch.zeros((B, register_tokens.shape[1]), dtype=torch.bool, device=encoder_mask.device),
+                 encoder_mask], dim=1)
+            mod_mask = torch.cat(
+                [torch.full((B, register_tokens.shape[1]), -1, dtype=torch.int, device=mod_mask.device), mod_mask],
+                dim=1)
 
         encoder_tokens[encoder_mask] = 0.
         encoder_emb[encoder_mask] = 0.
@@ -536,7 +545,6 @@ class GenerationSampler(nn.Module):
 
         return encoder_tokens, encoder_emb, encoder_mask, mod_mask
 
-
     def forward_mask_decoder_maskgit(self, mod_dict, target_mod, seed=None):
         """Modification of forward_mask_decoder for MaskGIT generation, with support for batching
         """
@@ -546,12 +554,12 @@ class GenerationSampler(nn.Module):
         decoder_tokens_all = torch.zeros_like(d['x']) + self.model.mask_token
         emb_all = d['emb']
         decoder_mask_all = d['target_mask']
-        B = decoder_tokens_all.shape[0] # Get batch size
+        B = decoder_tokens_all.shape[0]  # Get batch size
         mod_mask_all = torch.full_like(d['ids'], self.model.modality_info[target_mod]['id'], dtype=torch.int)
         mod_pos_all = torch.arange(d['x'].shape[1], device=d['x'].device).unsqueeze(0)
-        mod_pos_all = repeat(mod_pos_all, '1 n -> b n', b=B) # Added: Expansion for batching
-        num_decoder_tokens = (~decoder_mask_all[0]).sum()  # Adapted for batching / Assumes num_decoder_tokens is the same across the batch
-
+        mod_pos_all = repeat(mod_pos_all, '1 n -> b n', b=B)  # Added: Expansion for batching
+        num_decoder_tokens = (~decoder_mask_all[
+            0]).sum()  # Adapted for batching / Assumes num_decoder_tokens is the same across the batch
 
         # Add arange multiplied by small constant to mask so they get sorted in a deterministic way
         mask_arange = torch.arange(decoder_mask_all.shape[1], device=decoder_mask_all.device).unsqueeze(0) * 1e-6
@@ -559,7 +567,8 @@ class GenerationSampler(nn.Module):
         # ids_restore = torch.argsort(ids_shuffle, dim=1)
         ids_keep = ids_shuffle[:, :num_decoder_tokens]
 
-        decoder_tokens = torch.gather(decoder_tokens_all, dim=1, index=repeat(ids_keep, "b n -> b n d", d=decoder_tokens_all.shape[2]))
+        decoder_tokens = torch.gather(decoder_tokens_all, dim=1,
+                                      index=repeat(ids_keep, "b n -> b n d", d=decoder_tokens_all.shape[2]))
         decoder_emb = torch.gather(emb_all, dim=1, index=repeat(ids_keep, "b n -> b n d", d=emb_all.shape[2]))
         decoder_mask = torch.gather(decoder_mask_all, dim=1, index=ids_keep)
         mod_mask = torch.gather(mod_mask_all, dim=1, index=ids_keep)
@@ -580,13 +589,14 @@ class GenerationSampler(nn.Module):
         decoder_tokens_all = torch.zeros_like(d['x']) + self.model.mask_token
         emb_all = d['emb']
         decoder_mask_all = d['target_mask']
-        B = decoder_tokens_all.shape[0] # Get batch size
+        B = decoder_tokens_all.shape[0]  # Get batch size
         mod_mask_all = torch.full_like(d['ids'], self.model.modality_info[target_mod]['id'], dtype=torch.int)
         mod_pos_all = torch.arange(d['x'].shape[1], device=d['x'].device).unsqueeze(0)
-        mod_pos_all = repeat(mod_pos_all, '1 n -> b n', b=B) # Added: Expansion for batching
+        mod_pos_all = repeat(mod_pos_all, '1 n -> b n', b=B)  # Added: Expansion for batching
         # Only keep the first num_select tokens
-        num_decoder_tokens = min(num_select, (~decoder_mask_all[0]).sum())  # Adapted for batching / Assumes num_decoder_tokens is the same across the batch
- 
+        num_decoder_tokens = min(num_select, (~decoder_mask_all[
+            0]).sum())  # Adapted for batching / Assumes num_decoder_tokens is the same across the batch
+
         # Add a small random number to the mask so they get sorted in a random way, but keeping the masked tokens first
         mask_rand = torch.rand(decoder_mask_all.shape[1], device=decoder_mask_all.device).unsqueeze(0) * 1e-6
         ids_shuffle = torch.argsort(decoder_mask_all + mask_rand, dim=1)
@@ -594,7 +604,8 @@ class GenerationSampler(nn.Module):
         # Only keep the first num_select_tokens
         ids_keep = ids_shuffle[:, :num_decoder_tokens]
 
-        decoder_tokens = torch.gather(decoder_tokens_all, dim=1, index=repeat(ids_keep, "b n -> b n d", d=decoder_tokens_all.shape[2]))
+        decoder_tokens = torch.gather(decoder_tokens_all, dim=1,
+                                      index=repeat(ids_keep, "b n -> b n d", d=decoder_tokens_all.shape[2]))
         decoder_emb = torch.gather(emb_all, dim=1, index=repeat(ids_keep, "b n -> b n d", d=emb_all.shape[2]))
         decoder_mask = torch.gather(decoder_mask_all, dim=1, index=ids_keep)
         mod_mask = torch.gather(mod_mask_all, dim=1, index=ids_keep)
@@ -615,12 +626,13 @@ class GenerationSampler(nn.Module):
         decoder_ids_all = d['ids']
         emb_all = d['emb']
         decoder_mask_all = d['target_mask']
-        B = decoder_ids_all.shape[0] # Get batch size
+        B = decoder_ids_all.shape[0]  # Get batch size
         mod_mask_all = torch.full_like(d['ids'], self.model.modality_info[target_mod]['id'], dtype=torch.int)
         mod_pos_all = torch.arange(d['x'].shape[1], device=d['x'].device).unsqueeze(0)
-        mod_pos_all = repeat(mod_pos_all, '1 n -> b n', b=B) 
-        num_decoder_tokens = (~decoder_mask_all[0]).sum() # Adapted for batching, but assumes num_decoder_tokens is the same across the batch
- 
+        mod_pos_all = repeat(mod_pos_all, '1 n -> b n', b=B)
+        num_decoder_tokens = (~decoder_mask_all[
+            0]).sum()  # Adapted for batching, but assumes num_decoder_tokens is the same across the batch
+
         # Add arange multiplied by small constant to mask so they get sorted in a deterministic way
         mask_arange = torch.arange(decoder_mask_all.shape[1], device=decoder_mask_all.device).unsqueeze(0) * 1e-6
         ids_shuffle = torch.argsort(decoder_mask_all + mask_arange, dim=1)
@@ -670,12 +682,12 @@ class GenerationSampler(nn.Module):
 
         mod_dict[target_mod] = new_dict
         return mod_dict
-    
+
     def merge_sequences_batched(self, mod_dict, pred_ids, target_mod, text_tokenizer, default_sentinel="[S_1]"):
         # Unbatches and calls merge sequence per batch, then regroups it into a batch
-        
+
         pad_id = text_tokenizer.token_to_id("[PAD]")
-        
+
         B = mod_dict[target_mod]['tensor'].shape[0]
         device = mod_dict[target_mod]['tensor'].device
 
@@ -700,13 +712,12 @@ class GenerationSampler(nn.Module):
             merged_target_masks.append(merged_d['input_mask'])
             merged_seq_lens.append(merged_d['tensor'].shape[1])
 
-
         max_seq_len = max(merged_seq_lens)
 
         for i in range(len(merged_tensors)):
             # Right pad all tensors
             p1d = (0, max_seq_len - merged_seq_lens[i])
-            merged_tensors[i] = F.pad(merged_tensors[i], p1d, "constant",pad_id)
+            merged_tensors[i] = F.pad(merged_tensors[i], p1d, "constant", pad_id)
             merged_input_masks[i] = F.pad(merged_input_masks[i], p1d, "constant", True)
             merged_target_masks[i] = F.pad(merged_target_masks[i], p1d, "constant", True)
 
@@ -723,39 +734,42 @@ class GenerationSampler(nn.Module):
         encoder_mod_dict = {mod: self.model.encoder_embeddings[mod](d)
                             for mod, d in mod_dict.items()
                             if mod in self.model.encoder_embeddings}
-        encoder_tokens, encoder_emb, encoder_mask, encoder_mod_mask = self.forward_mask_encoder_generation(encoder_mod_dict)
+        encoder_tokens, encoder_emb, encoder_mask, encoder_mod_mask = self.forward_mask_encoder_generation(
+            encoder_mod_dict)
         x = encoder_tokens + encoder_emb
         x = self.model.forward_encoder(x, encoder_mask)
 
         # Decoder
         context = self.model.decoder_proj_context(x) + encoder_emb
         decoder_mod_dict = {target_mod: self.model.decoder_embeddings[target_mod].forward_embed(mod_dict[target_mod])}
-        decoder_tokens, decoder_emb, decoder_mask, decoder_mod_mask, mod_pos = self.forward_mask_decoder_maskgit(decoder_mod_dict, target_mod, seed=seed)
+        decoder_tokens, decoder_emb, decoder_mask, decoder_mod_mask, mod_pos = self.forward_mask_decoder_maskgit(
+            decoder_mod_dict, target_mod, seed=seed)
         y = decoder_tokens + decoder_emb
         y = self.model.forward_decoder(y, context, encoder_mask, None)
         B, N, D = y.shape
         logits = self.model.forward_logits(y, decoder_mod_dict, decoder_mod_mask)[target_mod]
         logits = logits.reshape(B, N, -1)
 
-
         return logits, mod_pos
 
-    def maskgit_step_batched(self, mod_dict, target_mod, num_select, temperature, top_k, top_p, seed=None):        
+    def maskgit_step_batched(self, mod_dict, target_mod, num_select, temperature, top_k, top_p, seed=None):
         logits, mod_pos = self.forward_enc_dec_maskgit_batched(mod_dict, target_mod, seed=seed)
 
         # MaskGIT sampling
         top_samples, top_indices = self.select_tokens_batched(logits, num_select,
-                                                      temperature=temperature, top_k=top_k, top_p=top_p)
+                                                              temperature=temperature, top_k=top_k, top_p=top_p)
         # Update mod dict
         # We rely on gather / scatter for batched operations
-        top_pos = torch.gather(mod_pos, -1, top_indices) # (B, num_select)
+        top_pos = torch.gather(mod_pos, -1, top_indices)  # (B, num_select)
         mod_dict[target_mod]['tensor'] = torch.scatter(mod_dict[target_mod]['tensor'], -1, top_pos, top_samples)
-        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, top_pos, torch.zeros_like(top_samples, dtype=torch.bool))
-        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, top_pos, torch.ones_like(top_samples, dtype=torch.bool))
+        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, top_pos,
+                                                           torch.zeros_like(top_samples, dtype=torch.bool))
+        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, top_pos,
+                                                            torch.ones_like(top_samples, dtype=torch.bool))
 
         return mod_dict
 
-    def guided_maskgit_step_batched(self, mod_dict, target_mod, num_select, temperature, top_k, top_p, 
+    def guided_maskgit_step_batched(self, mod_dict, target_mod, num_select, temperature, top_k, top_p,
                                     conditioning=[], guidance_scale=1.0, seed=None, write_all_predictions=False):
 
         ### 1 - First pass, with conditioning
@@ -766,7 +780,7 @@ class GenerationSampler(nn.Module):
         for mod in conditioning:
             if self.model.modality_info[mod]['type'] in ['seq', 'seq_token']:
                 mod_dict_uncond = empty_seq_modality(mod_dict_uncond, mod)
-            elif self.model.modality_info[mod]['type'] in ['seq_emb']: 
+            elif self.model.modality_info[mod]['type'] in ['seq_emb']:
                 mod_dict_uncond = empty_seq_emb_modality(mod_dict_uncond, mod)
             else:
                 mod_dict_uncond = empty_img_modality(mod_dict_uncond, mod)
@@ -779,23 +793,25 @@ class GenerationSampler(nn.Module):
         ### 4 - MaskGIT sampling
         top_samples, top_indices, all_samples = self.select_tokens_batched(
             logits, num_select,
-            temperature=temperature, top_k=top_k, top_p=top_p, 
+            temperature=temperature, top_k=top_k, top_p=top_p,
             return_all_samples=True
         )
 
         ### 5 - Update mod dict
         # We rely on gather / scatter for batched operations
-        top_pos = torch.gather(mod_pos, -1, top_indices) # (B, num_select)
+        top_pos = torch.gather(mod_pos, -1, top_indices)  # (B, num_select)
         if write_all_predictions:
             mod_dict[target_mod]['tensor'][:, mod_pos] = all_samples
         else:
             mod_dict[target_mod]['tensor'] = torch.scatter(mod_dict[target_mod]['tensor'], -1, top_pos, top_samples)
-        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, top_pos, torch.zeros_like(top_samples, dtype=torch.bool))
-        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, top_pos, torch.ones_like(top_samples, dtype=torch.bool))
+        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, top_pos,
+                                                           torch.zeros_like(top_samples, dtype=torch.bool))
+        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, top_pos,
+                                                            torch.ones_like(top_samples, dtype=torch.bool))
 
         return mod_dict
 
-    def multi_guided_maskgit_step_batched(self, uncond_dict, cond_dicts, cond_weights, target_mod, num_select, 
+    def multi_guided_maskgit_step_batched(self, uncond_dict, cond_dicts, cond_weights, target_mod, num_select,
                                           temperature, top_k, top_p, seed=None, write_all_predictions=False):
 
         ### 1 - Conditional forward passes (one for each guided condition)
@@ -803,35 +819,44 @@ class GenerationSampler(nn.Module):
         for cond_dict in cond_dicts:
             logits_cond_i, _ = self.forward_enc_dec_maskgit_batched(cond_dict, target_mod, seed=seed)
             logits_cond_all.append(logits_cond_i)
-        
+
         ### 2 - Unconditional forward pass
         logits_uncond, mod_pos = self.forward_enc_dec_maskgit_batched(uncond_dict, target_mod, seed=seed)
 
         ### 3 Conjunction of multiple conditions: l_uncond + sum_i{w_i * (l_cond_i - l_uncond)}
         # See https://arxiv.org/abs/2206.01714
-        logits = logits_uncond + torch.stack([w * (logits_cond - logits_uncond) for w, logits_cond in zip(cond_weights, logits_cond_all)]).sum(dim=0)
+        logits = logits_uncond + torch.stack(
+            [w * (logits_cond - logits_uncond) for w, logits_cond in zip(cond_weights, logits_cond_all)]).sum(dim=0)
 
         ### 4 - MaskGIT sampling
         top_samples, top_indices, all_samples = self.select_tokens_batched(
             logits, num_select,
-            temperature=temperature, top_k=top_k, top_p=top_p, 
+            temperature=temperature, top_k=top_k, top_p=top_p,
             return_all_samples=True
         )
-        
+
         ### 5 - Update mod dict with newly generated tokens
         # We rely on gather / scatter for batched operations
-        top_pos = torch.gather(mod_pos, -1, top_indices) # (B, num_select)
+        top_pos = torch.gather(mod_pos, -1, top_indices)  # (B, num_select)
         if write_all_predictions:
             uncond_dict[target_mod]['tensor'][:, mod_pos] = all_samples
         else:
-            uncond_dict[target_mod]['tensor'] = torch.scatter(uncond_dict[target_mod]['tensor'], -1, top_pos, top_samples)
-        uncond_dict[target_mod]['input_mask'] = torch.scatter(uncond_dict[target_mod]['input_mask'], -1, top_pos, torch.zeros_like(top_samples, dtype=torch.bool))
-        uncond_dict[target_mod]['target_mask'] = torch.scatter(uncond_dict[target_mod]['target_mask'], -1, top_pos, torch.ones_like(top_samples, dtype=torch.bool))
+            uncond_dict[target_mod]['tensor'] = torch.scatter(uncond_dict[target_mod]['tensor'], -1, top_pos,
+                                                              top_samples)
+        uncond_dict[target_mod]['input_mask'] = torch.scatter(uncond_dict[target_mod]['input_mask'], -1, top_pos,
+                                                              torch.zeros_like(top_samples, dtype=torch.bool))
+        uncond_dict[target_mod]['target_mask'] = torch.scatter(uncond_dict[target_mod]['target_mask'], -1, top_pos,
+                                                               torch.ones_like(top_samples, dtype=torch.bool))
         # Update conditioning dicts
         for i in range(len(cond_dicts)):
-            cond_dicts[i][target_mod]['tensor'] = torch.scatter(cond_dicts[i][target_mod]['tensor'], -1, top_pos, top_samples)
-            cond_dicts[i][target_mod]['input_mask'] = torch.scatter(cond_dicts[i][target_mod]['input_mask'], -1, top_pos, torch.zeros_like(top_samples, dtype=torch.bool))
-            cond_dicts[i][target_mod]['target_mask'] = torch.scatter(cond_dicts[i][target_mod]['target_mask'], -1, top_pos, torch.ones_like(top_samples, dtype=torch.bool))
+            cond_dicts[i][target_mod]['tensor'] = torch.scatter(cond_dicts[i][target_mod]['tensor'], -1, top_pos,
+                                                                top_samples)
+            cond_dicts[i][target_mod]['input_mask'] = torch.scatter(cond_dicts[i][target_mod]['input_mask'], -1,
+                                                                    top_pos,
+                                                                    torch.zeros_like(top_samples, dtype=torch.bool))
+            cond_dicts[i][target_mod]['target_mask'] = torch.scatter(cond_dicts[i][target_mod]['target_mask'], -1,
+                                                                     top_pos,
+                                                                     torch.ones_like(top_samples, dtype=torch.bool))
 
         return uncond_dict, cond_dicts
 
@@ -840,14 +865,16 @@ class GenerationSampler(nn.Module):
         encoder_mod_dict = {mod: self.model.encoder_embeddings[mod](d)
                             for mod, d in mod_dict.items()
                             if mod in self.model.encoder_embeddings}
-        encoder_tokens, encoder_emb, encoder_mask, encoder_mod_mask = self.forward_mask_encoder_generation(encoder_mod_dict)
+        encoder_tokens, encoder_emb, encoder_mask, encoder_mod_mask = self.forward_mask_encoder_generation(
+            encoder_mod_dict)
         x = encoder_tokens + encoder_emb
         x = self.model.forward_encoder(x, encoder_mask)
 
         # Decoder
         context = self.model.decoder_proj_context(x) + encoder_emb
         decoder_mod_dict = {target_mod: self.model.decoder_embeddings[target_mod].forward_embed(mod_dict[target_mod])}
-        decoder_tokens, decoder_emb, decoder_mask, decoder_mod_mask, mod_pos = self.forward_mask_decoder_roar(decoder_mod_dict, target_mod, num_select, seed=seed)
+        decoder_tokens, decoder_emb, decoder_mask, decoder_mod_mask, mod_pos = self.forward_mask_decoder_roar(
+            decoder_mod_dict, target_mod, num_select, seed=seed)
         y = decoder_tokens + decoder_emb
         y = self.model.forward_decoder(y, context, encoder_mask, None)
         B, N, D = y.shape
@@ -868,12 +895,14 @@ class GenerationSampler(nn.Module):
         # We rely on scatter for batched operations
         select_pos = mod_pos
         mod_dict[target_mod]['tensor'] = torch.scatter(mod_dict[target_mod]['tensor'], -1, select_pos, samples)
-        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, select_pos, torch.zeros_like(samples, dtype=torch.bool))
-        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, select_pos, torch.ones_like(samples, dtype=torch.bool))
+        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, select_pos,
+                                                           torch.zeros_like(samples, dtype=torch.bool))
+        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, select_pos,
+                                                            torch.ones_like(samples, dtype=torch.bool))
 
         return mod_dict
 
-    def guided_roar_step_batched(self, mod_dict, target_mod, num_select, temperature, top_k, top_p, 
+    def guided_roar_step_batched(self, mod_dict, target_mod, num_select, temperature, top_k, top_p,
                                  conditioning=[], guidance_scale=1.0, seed=None):
         """ROAR = Random Order Autoregression"""
 
@@ -885,7 +914,7 @@ class GenerationSampler(nn.Module):
         for mod in conditioning:
             if self.model.modality_info[mod]['type'] in ['seq', 'seq_token']:
                 mod_dict_uncond = empty_seq_modality(mod_dict_uncond, mod)
-            elif self.model.modality_info[mod]['type'] in ['seq_emb']: 
+            elif self.model.modality_info[mod]['type'] in ['seq_emb']:
                 mod_dict_uncond = empty_seq_emb_modality(mod_dict_uncond, mod)
             else:
                 mod_dict_uncond = empty_img_modality(mod_dict_uncond, mod)
@@ -902,12 +931,14 @@ class GenerationSampler(nn.Module):
         # We rely on gather / scatter for batched operations
         select_pos = mod_pos
         mod_dict[target_mod]['tensor'] = torch.scatter(mod_dict[target_mod]['tensor'], -1, select_pos, samples)
-        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, select_pos, torch.zeros_like(samples, dtype=torch.bool))
-        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, select_pos, torch.ones_like(samples, dtype=torch.bool))
+        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, select_pos,
+                                                           torch.zeros_like(samples, dtype=torch.bool))
+        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, select_pos,
+                                                            torch.ones_like(samples, dtype=torch.bool))
 
         return mod_dict
 
-    def multi_guided_roar_step_batched(self, uncond_dict, cond_dicts, cond_weights, target_mod, 
+    def multi_guided_roar_step_batched(self, uncond_dict, cond_dicts, cond_weights, target_mod,
                                        num_select, temperature, top_k, top_p, seed=None):
 
         ### 1 - Conditional forward passes (one for each guided condition)
@@ -915,29 +946,37 @@ class GenerationSampler(nn.Module):
         for cond_dict in cond_dicts:
             logits_cond_i, _ = self.forward_enc_dec_roar_batched(cond_dict, target_mod, num_select, seed=seed)
             logits_cond_all.append(logits_cond_i)
-        
+
         ### 2 - Unconditional forward pass
         logits_uncond, mod_pos = self.forward_enc_dec_roar_batched(uncond_dict, target_mod, num_select, seed=seed)
 
         ### 3 Conjunction of multiple conditions: l_uncond + sum_i{w_i * (l_cond_i - l_uncond)}
         # See https://arxiv.org/abs/2206.01714
-        logits = logits_uncond + torch.stack([w * (logits_cond - logits_uncond) for w, logits_cond in zip(cond_weights, logits_cond_all)]).sum(dim=0)
+        logits = logits_uncond + torch.stack(
+            [w * (logits_cond - logits_uncond) for w, logits_cond in zip(cond_weights, logits_cond_all)]).sum(dim=0)
 
         ### 4 - Simple sampling
         samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k=top_k, top_p=top_p)
-        
+
         ### 5 - Update mod dict
         # We rely on gather / scatter for batched operations
         select_pos = mod_pos
         uncond_dict[target_mod]['tensor'] = torch.scatter(uncond_dict[target_mod]['tensor'], -1, select_pos, samples)
-        uncond_dict[target_mod]['input_mask'] = torch.scatter(uncond_dict[target_mod]['input_mask'], -1, select_pos, torch.zeros_like(samples, dtype=torch.bool))
-        uncond_dict[target_mod]['target_mask'] = torch.scatter(uncond_dict[target_mod]['target_mask'], -1, select_pos, torch.ones_like(samples, dtype=torch.bool))
+        uncond_dict[target_mod]['input_mask'] = torch.scatter(uncond_dict[target_mod]['input_mask'], -1, select_pos,
+                                                              torch.zeros_like(samples, dtype=torch.bool))
+        uncond_dict[target_mod]['target_mask'] = torch.scatter(uncond_dict[target_mod]['target_mask'], -1, select_pos,
+                                                               torch.ones_like(samples, dtype=torch.bool))
         # Update conditioning dicts
         for i in range(len(cond_dicts)):
-            cond_dicts[i][target_mod]['tensor'] = torch.scatter(cond_dicts[i][target_mod]['tensor'], -1, select_pos, samples)
-            cond_dicts[i][target_mod]['input_mask'] = torch.scatter(cond_dicts[i][target_mod]['input_mask'], -1, select_pos, torch.ones_like(samples, dtype=torch.bool))
-            cond_dicts[i][target_mod]['target_mask'] = torch.scatter(cond_dicts[i][target_mod]['target_mask'], -1, select_pos, torch.zeros_like(samples, dtype=torch.bool))
-        
+            cond_dicts[i][target_mod]['tensor'] = torch.scatter(cond_dicts[i][target_mod]['tensor'], -1, select_pos,
+                                                                samples)
+            cond_dicts[i][target_mod]['input_mask'] = torch.scatter(cond_dicts[i][target_mod]['input_mask'], -1,
+                                                                    select_pos,
+                                                                    torch.ones_like(samples, dtype=torch.bool))
+            cond_dicts[i][target_mod]['target_mask'] = torch.scatter(cond_dicts[i][target_mod]['target_mask'], -1,
+                                                                     select_pos,
+                                                                     torch.zeros_like(samples, dtype=torch.bool))
+
         return uncond_dict, cond_dicts
 
     def autoregressive_step_batched(self, mod_dict, target_mod, temperature, top_k: float | int, top_p: float,
@@ -947,9 +986,10 @@ class GenerationSampler(nn.Module):
         encoder_mod_dict = {mod: self.model.encoder_embeddings[mod](d)
                             for mod, d in mod_dict.items()
                             if mod in self.model.encoder_embeddings}
-        encoder_tokens, encoder_emb, encoder_mask, encoder_mod_mask = self.forward_mask_encoder_generation(encoder_mod_dict)
+        encoder_tokens, encoder_emb, encoder_mask, encoder_mod_mask = self.forward_mask_encoder_generation(
+            encoder_mod_dict)
         x = encoder_tokens + encoder_emb
-        x = self.model.forward_encoder(x, encoder_mask) # B, N, D
+        x = self.model.forward_encoder(x, encoder_mask)  # B, N, D
 
         # Get batch size
         B = x.shape[0]
@@ -957,13 +997,14 @@ class GenerationSampler(nn.Module):
         # Decoder
         context = self.model.decoder_proj_context(x) + encoder_emb
         decoder_mod_dict = {target_mod: self.model.decoder_embeddings[target_mod].forward_embed(mod_dict[target_mod])}
-        decoder_ids, decoder_emb, decoder_mask, decoder_mod_mask, mod_pos = self.forward_mask_decoder_autoregressive(decoder_mod_dict, target_mod, seed=seed)
+        decoder_ids, decoder_emb, decoder_mask, decoder_mod_mask, mod_pos = self.forward_mask_decoder_autoregressive(
+            decoder_mod_dict, target_mod, seed=seed)
         device = decoder_ids.device
         seq_len = self.model.modality_info[target_mod]['max_tokens']
 
         if use_eos and eos_token is None:
             # The eos_token is the final sentinel token provided
-            eos_token = decoder_ids[0][decoder_mask[0] == 0][-1] # Assumes the EOS token is the same for all
+            eos_token = decoder_ids[0][decoder_mask[0] == 0][-1]  # Assumes the EOS token is the same for all
         if use_eos:
             eos_token = eos_token.to(device)
 
@@ -987,7 +1028,7 @@ class GenerationSampler(nn.Module):
             # Build causal mask
             causal_mask = torch.ones((cur_len, cur_len), dtype=torch.bool, device=y.device).triu(1)
             causal_mask = repeat(causal_mask, "n1 n2 -> b n1 n2", b=B)
-            
+
             y = self.model.forward_decoder(y, context, encoder_mask, causal_mask)
             logits = self.model.forward_logits(y, decoder_mod_dict, decoder_mod_mask[:, :cur_len])[target_mod]
             logits = rearrange(logits, "(b n) d -> b n d", b=B, n=cur_len)
@@ -1010,29 +1051,31 @@ class GenerationSampler(nn.Module):
         return mod_dict
 
     def guided_autoregressive_step_batched(self, mod_dict, target_mod, temperature, top_k: float | int, top_p: float,
-                                           use_eos=True, eos_token=None, start_tokens=None, text_tokenizer=None, 
+                                           use_eos=True, eos_token=None, start_tokens=None, text_tokenizer=None,
                                            conditioning=[], guidance_scale=1.0, seed=None):
 
-         ### 1 - Encoder forward pass, with conditioning
-        
+        ### 1 - Encoder forward pass, with conditioning
+
         # Encoder
         encoder_mod_dict = {mod: self.model.encoder_embeddings[mod](d)
                             for mod, d in mod_dict.items()
                             if mod in self.model.encoder_embeddings}
-        encoder_tokens, encoder_emb, encoder_mask_cond, encoder_mod_mask = self.forward_mask_encoder_generation(encoder_mod_dict)
+        encoder_tokens, encoder_emb, encoder_mask_cond, encoder_mod_mask = self.forward_mask_encoder_generation(
+            encoder_mod_dict)
         x = encoder_tokens + encoder_emb
-        x = self.model.forward_encoder(x, encoder_mask_cond) # B, N, D
+        x = self.model.forward_encoder(x, encoder_mask_cond)  # B, N, D
 
         # Get batch size
         B = x.shape[0]
 
         # Decoder
         context_cond = self.model.decoder_proj_context(x) + encoder_emb
-        decoder_mod_dict_cond = {target_mod: self.model.decoder_embeddings[target_mod].forward_embed(mod_dict[target_mod])}
-        decoder_ids, decoder_emb, decoder_mask, decoder_mod_mask_cond, mod_pos = self.forward_mask_decoder_autoregressive(decoder_mod_dict_cond, target_mod, seed=seed)
+        decoder_mod_dict_cond = {
+            target_mod: self.model.decoder_embeddings[target_mod].forward_embed(mod_dict[target_mod])}
+        decoder_ids, decoder_emb, decoder_mask, decoder_mod_mask_cond, mod_pos = self.forward_mask_decoder_autoregressive(
+            decoder_mod_dict_cond, target_mod, seed=seed)
         device = decoder_ids.device
         seq_len = self.model.modality_info[target_mod]['max_tokens']
-
 
         ### 2 - Encoder forward pass, without conditioning
 
@@ -1040,7 +1083,7 @@ class GenerationSampler(nn.Module):
         for mod in conditioning:
             if self.model.modality_info[mod]['type'] in ['seq', 'seq_token']:
                 mod_dict_uncond = empty_seq_modality(mod_dict_uncond, mod)
-            elif self.model.modality_info[mod]['type'] in ['seq_emb']: 
+            elif self.model.modality_info[mod]['type'] in ['seq_emb']:
                 mod_dict_uncond = empty_seq_emb_modality(mod_dict_uncond, mod)
             else:
                 mod_dict_uncond = empty_img_modality(mod_dict_uncond, mod)
@@ -1049,19 +1092,21 @@ class GenerationSampler(nn.Module):
         encoder_mod_dict = {mod: self.model.encoder_embeddings[mod](d)
                             for mod, d in mod_dict_uncond.items()
                             if mod in self.model.encoder_embeddings}
-        encoder_tokens, encoder_emb, encoder_mask_uncond, encoder_mod_mask = self.forward_mask_encoder_generation(encoder_mod_dict)
+        encoder_tokens, encoder_emb, encoder_mask_uncond, encoder_mod_mask = self.forward_mask_encoder_generation(
+            encoder_mod_dict)
         x = encoder_tokens + encoder_emb
-        x = self.model.forward_encoder(x, encoder_mask_uncond) # B, N, D
+        x = self.model.forward_encoder(x, encoder_mask_uncond)  # B, N, D
 
         # Decoder
         context_uncond = self.model.decoder_proj_context(x) + encoder_emb
-        decoder_mod_dict_uncond = {target_mod: self.model.decoder_embeddings[target_mod].forward_embed(mod_dict[target_mod])}
-        decoder_ids, decoder_emb, decoder_mask, decoder_mod_mask_uncond, mod_pos = self.forward_mask_decoder_autoregressive(decoder_mod_dict_uncond, target_mod, seed=seed)
-
+        decoder_mod_dict_uncond = {
+            target_mod: self.model.decoder_embeddings[target_mod].forward_embed(mod_dict[target_mod])}
+        decoder_ids, decoder_emb, decoder_mask, decoder_mod_mask_uncond, mod_pos = self.forward_mask_decoder_autoregressive(
+            decoder_mod_dict_uncond, target_mod, seed=seed)
 
         if use_eos and eos_token is None:
             # The eos_token is the final sentinel token provided
-            eos_token = decoder_ids[0][decoder_mask[0] == 0][-1] # Assumes the EOS token is the same for all
+            eos_token = decoder_ids[0][decoder_mask[0] == 0][-1]  # Assumes the EOS token is the same for all
         if use_eos:
             eos_token = eos_token.to(device)
 
@@ -1085,16 +1130,19 @@ class GenerationSampler(nn.Module):
             # Build causal mask
             causal_mask = torch.ones((cur_len, cur_len), dtype=torch.bool, device=y.device).triu(1)
             causal_mask = repeat(causal_mask, "n1 n2 -> b n1 n2", b=B)
-            
+
             ### 3a - Decoder forward pass, with conditioning
             y_cond = self.model.forward_decoder(y, context_cond, encoder_mask_cond, causal_mask)
-            logits_cond = self.model.forward_logits(y_cond, decoder_mod_dict_cond, decoder_mod_mask_cond[:, :cur_len])[target_mod]
+            logits_cond = self.model.forward_logits(y_cond, decoder_mod_dict_cond, decoder_mod_mask_cond[:, :cur_len])[
+                target_mod]
             logits_cond = rearrange(logits_cond, "(b n) d -> b n d", b=B, n=cur_len)
             last_logits_cond = logits_cond[:, -1]
 
             ### 3b - Decoder forward pass, without conditioning
             y_uncond = self.model.forward_decoder(y, context_uncond, encoder_mask_uncond, causal_mask)
-            logits_uncond = self.model.forward_logits(y_uncond, decoder_mod_dict_uncond, decoder_mod_mask_uncond[:, :cur_len])[target_mod]
+            logits_uncond = \
+            self.model.forward_logits(y_uncond, decoder_mod_dict_uncond, decoder_mod_mask_uncond[:, :cur_len])[
+                target_mod]
             logits_uncond = rearrange(logits_uncond, "(b n) d -> b n d", b=B, n=cur_len)
             last_logits_uncond = logits_uncond[:, -1]
 
@@ -1117,13 +1165,12 @@ class GenerationSampler(nn.Module):
 
         return mod_dict
 
-
     @torch.no_grad()
     def generate(self, mod_dict, schedule, top_k=0.0, top_p=0.0, tokenizer=None, verbose=False, seed=None,
                  num_tokens=None):
         """ Generates a sequence of tokens from the input modalities.
         :param mod_dict: Dictionary of modalities.
-        :param schedule: Schedule of modalities to use. 
+        :param schedule: Schedule of modalities to use.
             list of dictionaries containing {target_domain, scheme, num_tokens, temperature, cfg_scale, cfg_cond_domains}.
         :param top_k: top_k > 0: Keep only top k tokens with highest probability (a.k.a. top-k filtering).
         :param top_p: top_p > 0.0: Keep the top tokens with cumulative probability >= top_p (a.k.a. nucleus filtering).
@@ -1142,7 +1189,7 @@ class GenerationSampler(nn.Module):
             cfg_scale = schedule_step_info.get('cfg_scale', 1.0)
             cfg_conditioning = schedule_step_info.get('cfg_cond_domains', [])
             seed_i = seed + step if seed is not None else None
-            
+
             if self.model.modality_info[target_mod]['type'] == 'img':
                 scheme = schedule_step_info['scheme']
                 num_select = num_tokens or schedule_step_info['num_tokens']
@@ -1150,7 +1197,7 @@ class GenerationSampler(nn.Module):
                 if scheme.lower() == 'maskgit':
                     if cfg_scale == 1.0 or len(cfg_conditioning) == 0:
                         mod_dict = self.maskgit_step_batched(
-                            mod_dict, target_mod, num_select, temperature=temp, 
+                            mod_dict, target_mod, num_select, temperature=temp,
                             top_k=top_k, top_p=top_p, seed=seed_i
                         )
                     else:
@@ -1161,12 +1208,12 @@ class GenerationSampler(nn.Module):
                 elif scheme.lower() == 'roar':
                     if cfg_scale == 1.0 or len(cfg_conditioning) == 0:
                         mod_dict = self.roar_step_batched(
-                            mod_dict, target_mod, num_select, temperature=temp, 
+                            mod_dict, target_mod, num_select, temperature=temp,
                             top_k=top_k, top_p=top_p, seed=seed_i
                         )
                     else:
                         mod_dict = self.guided_roar_step_batched(
-                            mod_dict, target_mod, num_select, temperature=temp, top_k=top_k, top_p=top_p, 
+                            mod_dict, target_mod, num_select, temperature=temp, top_k=top_k, top_p=top_p,
                             conditioning=cfg_conditioning, guidance_scale=cfg_scale, seed=seed_i
                         )
                 else:
@@ -1188,12 +1235,11 @@ class GenerationSampler(nn.Module):
 
         return mod_dict
 
-
     @torch.no_grad()
     def generate_iter(self, mod_dict, schedule, top_k=0.0, top_p=0.0, text_tokenizer=None, verbose=False, seed=None):
         """ Iterator that generates a sequence of tokens from the input modalities step by step.
         :param mod_dict: Dictionary of modalities.
-        :param schedule: Schedule of modalities to use. 
+        :param schedule: Schedule of modalities to use.
             list of dictionaries containing {target_domain, scheme, num_tokens, temperature, cfg_scale, cfg_cond_domains}.
         :param top_k: top_k > 0: Keep only top k tokens with highest probability (a.k.a. top-k filtering).
         :param top_p: top_p > 0.0: Keep the top tokens with cumulative probability >= top_p (a.k.a. nucleus filtering).
@@ -1212,15 +1258,15 @@ class GenerationSampler(nn.Module):
             cfg_scale = schedule_step_info.get('cfg_scale', 1.0)
             cfg_conditioning = schedule_step_info.get('cfg_cond_domains', [])
             seed_i = seed + step if seed is not None else None
-            
+
             if self.model.modality_info[target_mod]['type'] == 'img':
                 scheme = schedule_step_info['scheme']
-                num_select = schedule_step_info['num_tokens']    
+                num_select = schedule_step_info['num_tokens']
 
                 if scheme.lower() == 'maskgit':
                     if cfg_scale == 1.0 or len(cfg_conditioning) == 0:
                         mod_dict = self.maskgit_step_batched(
-                            mod_dict, target_mod, num_select, temperature=temp, 
+                            mod_dict, target_mod, num_select, temperature=temp,
                             top_k=top_k, top_p=top_p, seed=seed_i
                         )
                     else:
@@ -1232,12 +1278,12 @@ class GenerationSampler(nn.Module):
                 elif scheme.lower() == 'roar':
                     if cfg_scale == 1.0 or len(cfg_conditioning) == 0:
                         mod_dict = self.roar_step_batched(
-                            mod_dict, target_mod, num_select, temperature=temp, 
+                            mod_dict, target_mod, num_select, temperature=temp,
                             top_k=top_k, top_p=top_p, seed=seed_i
                         )
                     else:
                         mod_dict = self.guided_roar_step_batched(
-                            mod_dict, target_mod, num_select, temperature=temp, top_k=top_k, top_p=top_p, 
+                            mod_dict, target_mod, num_select, temperature=temp, top_k=top_k, top_p=top_p,
                             conditioning=cfg_conditioning, guidance_scale=cfg_scale, seed=seed_i
                         )
                 else:
@@ -1251,7 +1297,7 @@ class GenerationSampler(nn.Module):
                 else:
                     mod_dict = self.guided_autoregressive_step_batched(
                         mod_dict, target_mod, temperature=temp, top_k=top_k, top_p=top_p,
-                        text_tokenizer=text_tokenizer, conditioning=cfg_conditioning, 
+                        text_tokenizer=text_tokenizer, conditioning=cfg_conditioning,
                         guidance_scale=cfg_scale, seed=seed_i
                     )
             else:
@@ -1260,7 +1306,7 @@ class GenerationSampler(nn.Module):
             yield mod_dict
 
     @torch.no_grad()
-    def generate_multi_guided(self, uncond_dict, cond_dicts, schedule, top_k=0.0, top_p=0.0, 
+    def generate_multi_guided(self, uncond_dict, cond_dicts, schedule, top_k=0.0, top_p=0.0,
                               text_tokenizer=None, verbose=False, seed=None):
         # Generation function for multiple weighted conditions
 
@@ -1287,7 +1333,7 @@ class GenerationSampler(nn.Module):
                     del cond_dicts[i][cur_target_mod]
                     # Add the next modality to be generated to the conditionings
                     cond_dicts[i][target_mod] = copy.deepcopy(uncond_dict[target_mod])
-                
+
                 # Remove the fully generated modality from the unconditional dict inputs
                 uncond_dict[cur_target_mod]['input_mask'][:] = True
 

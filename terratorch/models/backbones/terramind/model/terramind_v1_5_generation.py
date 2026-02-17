@@ -31,7 +31,7 @@ from .generate import (
     build_chained_generation_schedules,
     init_full_input_modality,
     init_empty_target_modality,
-    # init_conditioned_target_modality,
+    init_conditioned_target_modality,
 )
 from .terramind import (
     TerraMind,
@@ -340,12 +340,10 @@ class TerraMindGeneration(nn.Module):
                 tok = rearrange(tok, "b (nh nw) -> b nh nw",
                                 nh=image_size[0] // patch_size, nw=image_size[1] // patch_size)
 
-                # To Do: Remove this. Was a minimal patch to see if code is working
-                tok = tok.repeat(128, 1, 1)
-
                 out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
                     tok,
                     image_size=image_size,
+                    timesteps=timesteps,
                     verbose=verbose
                 )
 

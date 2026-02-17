@@ -33,16 +33,19 @@ from terratorch.models.backbones.terramind.tokenizer.tokenizer_register import (
     terramind_v1_tokenizer_dem,
     terramind_v1_tokenizer_lulc,
     terramind_v1_tokenizer_ndvi,
-    terramind_v01_tokenizer_s2l2a,
-    terramind_v01_tokenizer_s1grd,
-    terramind_v01_tokenizer_dem,
-    terramind_v01_tokenizer_lulc,
-    terramind_v01_caption_tokenizer,
     terramind_v1_coords_tokenizer,
+    terramind_v1_5_tokenizer_s2l2a,
+    terramind_v1_5_tokenizer_s2l1c,
+    terramind_v1_5_tokenizer_s2rgb,
+    terramind_v1_5_tokenizer_s1rtc,
+    terramind_v1_5_tokenizer_s1grd,
+    terramind_v1_5_tokenizer_dem,
+    terramind_v1_5_tokenizer_lulc,
+    terramind_v1_5_tokenizer_ndvi,
+    terramind_v1_5_tokenizer_naip,
 )
 
 logger = logging.getLogger('terramind')
-
 
 # Model definitions
 __all__ = [
@@ -64,30 +67,37 @@ __all__ = [
     "terramind_v1_small_generate",
     "terramind_v1_base_generate",
     "terramind_v1_large_generate",
+    # v1_5 starts here
+    "terramind_v1_5_tiny",
+    "terramind_v1_5_tiny_generate",
 ]
 
 pretrained_weights = {
-        "terramind_v01_base": {
-            "hf_hub_id": "FAST-EO/TerraMind-0.1-base",
-            "hf_hub_filename": "TerraMind_v01_base.pt",
-        },
-        "terramind_v1_tiny": {
-            "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-tiny",
-            "hf_hub_filename": "TerraMind_v1_tiny.pt",
-        },
-        "terramind_v1_small": {
-            "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-small",
-            "hf_hub_filename": "TerraMind_v1_small.pt",
-        },
-        "terramind_v1_base": {
-            "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-base",
-            "hf_hub_filename": "TerraMind_v1_base.pt",
-        },
-        "terramind_v1_large": {
-            "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-large",
-            "hf_hub_filename": "TerraMind_v1_large.pt",
-        },
-    }
+    "terramind_v01_base": {
+        "hf_hub_id": "FAST-EO/TerraMind-0.1-base",
+        "hf_hub_filename": "TerraMind_v01_base.pt",
+    },
+    "terramind_v1_tiny": {
+        "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-tiny",
+        "hf_hub_filename": "TerraMind_v1_tiny.pt",
+    },
+    "terramind_v1_5_tiny": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-tiny",
+        "hf_hub_filename": "TerraMind_v1_5_tiny.pt",
+    },
+    "terramind_v1_small": {
+        "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-small",
+        "hf_hub_filename": "TerraMind_v1_small.pt",
+    },
+    "terramind_v1_base": {
+        "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-base",
+        "hf_hub_filename": "TerraMind_v1_base.pt",
+    },
+    "terramind_v1_large": {
+        "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-large",
+        "hf_hub_filename": "TerraMind_v1_large.pt",
+    },
+}
 
 PRETRAINED_BANDS = {
     "untok_sen2l2a@224": [
@@ -125,46 +135,97 @@ PRETRAINED_BANDS = {
     "untok_dem@224": ["DEM"],
 }
 
-
 v01_pretraining_mean = {
-    "untok_sen2l2a@224": [794.311,  925.161, 1183.128, 1338.041, 1667.254, 2233.633, 2460.96 , 2555.569, 2619.542, 2703.298, 2406.497, 1841.645],
-    "tok_sen2l2a@224": [794.311,  925.161, 1183.128, 1338.041, 1667.254, 2233.633, 2460.96 , 2555.569, 2619.542, 2703.298, 2406.497, 1841.645],
+    "untok_sen2l2a@224": [794.311, 925.161, 1183.128, 1338.041, 1667.254, 2233.633, 2460.96, 2555.569, 2619.542,
+                          2703.298, 2406.497, 1841.645],
+    "tok_sen2l2a@224": [794.311, 925.161, 1183.128, 1338.041, 1667.254, 2233.633, 2460.96, 2555.569, 2619.542, 2703.298,
+                        2406.497, 1841.645],
     "tok_sen1grd@224": [-12.599, -20.293],
     "tok_lulc@224": [0],
     "tok_dem@224": [435.726],
 }
 
 v01_pretraining_std = {
-    "untok_sen2l2a@224": [1164.883, 1205.586, 1223.713, 1399.638, 1403.298, 1378.513, 1434.924, 1491.141, 1454.089, 1660.395, 1473.248, 1365.080],
-    "tok_sen2l2a@224": [1164.883, 1205.586, 1223.713, 1399.638, 1403.298, 1378.513, 1434.924, 1491.141, 1454.089, 1660.395, 1473.248, 1365.080],
+    "untok_sen2l2a@224": [1164.883, 1205.586, 1223.713, 1399.638, 1403.298, 1378.513, 1434.924, 1491.141, 1454.089,
+                          1660.395, 1473.248, 1365.080],
+    "tok_sen2l2a@224": [1164.883, 1205.586, 1223.713, 1399.638, 1403.298, 1378.513, 1434.924, 1491.141, 1454.089,
+                        1660.395, 1473.248, 1365.080],
     "tok_sen1grd@224": [5.195, 5.890],
     "tok_lulc@224": [1],
     "tok_dem@224": [560.326],
 }
 
 v1_pretraining_mean = {
-    "untok_sen2l2a@224": [1390.458, 1503.317, 1718.197, 1853.91, 2199.1, 2779.975, 2987.011, 3083.234, 3132.22, 3162.988, 2424.884, 1857.648],
-    "untok_sen2l1c@224": [2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 3122.849, 3040.56, 3306.481, 1473.847,  506.07, 2472.825, 1838.929],
+    "untok_sen2l2a@224": [1390.458, 1503.317, 1718.197, 1853.91, 2199.1, 2779.975, 2987.011, 3083.234, 3132.22,
+                          3162.988, 2424.884, 1857.648],
+    "untok_sen2l1c@224": [2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 3122.849, 3040.56, 3306.481,
+                          1473.847, 506.07, 2472.825, 1838.929],
     "untok_sen2rgb@224": [87.271, 80.931, 66.667],
     "untok_sen1grd@224": [-12.599, -20.293],
     "untok_sen1rtc@224": [-10.93, -17.329],
     "untok_dem@224": [670.665],
     "tok_sen1grd@224": [-12.599, -20.293],
     "tok_sen1rtc@224": [-10.93, -17.329],
-    "tok_sen2l2a@224": [1390.458, 1503.317, 1718.197, 1853.91, 2199.1, 2779.975, 2987.011, 3083.234, 3132.22, 3162.988, 2424.884, 1857.648],
+    "tok_sen2l2a@224": [1390.458, 1503.317, 1718.197, 1853.91, 2199.1, 2779.975, 2987.011, 3083.234, 3132.22, 3162.988,
+                        2424.884, 1857.648],
     "tok_lulc@224": [0],
     "tok_dem@224": [670.665],
     "tok_ndvi@224": [0.327],
 }
 
 v1_pretraining_std = {
-    "untok_sen2l2a@224": [2106.761, 2141.107, 2038.973, 2134.138, 2085.321, 1889.926, 1820.257, 1871.918, 1753.829, 1797.379, 1434.261, 1334.311],
-    "untok_sen2l1c@224": [1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 1732.131, 1679.732, 1727.26, 1024.687, 442.165, 1331.411, 1160.419],
+    "untok_sen2l2a@224": [2106.761, 2141.107, 2038.973, 2134.138, 2085.321, 1889.926, 1820.257, 1871.918, 1753.829,
+                          1797.379, 1434.261, 1334.311],
+    "untok_sen2l1c@224": [1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 1732.131, 1679.732, 1727.26,
+                          1024.687, 442.165, 1331.411, 1160.419],
     "untok_sen2rgb@224": [58.767, 47.663, 42.631],
     "untok_sen1grd@224": [5.195, 5.890],
     "untok_sen1rtc@224": [4.391, 4.459],
     "untok_dem@224": [951.272],
-    "tok_sen2l2a@224": [2106.761, 2141.107, 2038.973, 2134.138, 2085.321, 1889.926, 1820.257, 1871.918, 1753.829, 1797.379, 1434.261, 1334.311],
+    "tok_sen2l2a@224": [2106.761, 2141.107, 2038.973, 2134.138, 2085.321, 1889.926, 1820.257, 1871.918, 1753.829,
+                        1797.379, 1434.261, 1334.311],
+    "tok_sen1grd@224": [5.195, 5.890],
+    "tok_sen1rtc@224": [4.391, 4.459],
+    "tok_lulc@224": [1],
+    "tok_dem@224": [951.272],
+    "tok_ndvi@224": [0.322],
+}
+
+v1_5_pretraining_mean = {
+    "untok_sen2l2a@224": [1390.458, 1503.317, 1718.197, 1853.91, 2199.1, 2779.975, 2987.011, 3083.234, 3132.22,
+                          3162.988, 2424.884, 1857.648],
+    "untok_sen2l1c@224": [2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 3122.849, 3040.56, 3306.481,
+                          1473.847, 506.07, 2472.825, 1838.929],
+    "untok_sen2rgb@224": [87.271, 80.931, 66.667],
+    "untok_sen1grd@224": [-12.599, -20.293],
+    "untok_sen1rtc@224": [-10.93, -17.329],
+    "untok_dem@224": [670.665],
+    "tok_sen1grd@224": [-12.599, -20.293],
+    "tok_sen1rtc@224": [-10.93, -17.329],
+    "tok_sen2l2a@224": [1390.458, 1503.317, 1718.197, 1853.91, 2199.1, 2779.975, 2987.011, 3083.234, 3132.22, 3162.988,
+                        2424.884, 1857.648],
+    "tok_sen2l1c@224": [2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 3122.849, 3040.56, 3306.481,
+                        1473.847, 506.07, 2472.825, 1838.929],
+    "tok_sen2rgb@224": [87.271, 80.931, 66.667],
+    "tok_lulc@224": [0],
+    "tok_dem@224": [670.665],
+    "tok_ndvi@224": [0.327],
+}
+
+v1_5_pretraining_std = {
+    "untok_sen2l2a@224": [2106.761, 2141.107, 2038.973, 2134.138, 2085.321, 1889.926, 1820.257, 1871.918, 1753.829,
+                          1797.379, 1434.261, 1334.311],
+    "untok_sen2l1c@224": [1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 1732.131, 1679.732, 1727.26,
+                          1024.687, 442.165, 1331.411, 1160.419],
+    "untok_sen2rgb@224": [58.767, 47.663, 42.631],
+    "untok_sen1grd@224": [5.195, 5.890],
+    "untok_sen1rtc@224": [4.391, 4.459],
+    "untok_dem@224": [951.272],
+    "tok_sen2l2a@224": [2106.761, 2141.107, 2038.973, 2134.138, 2085.321, 1889.926, 1820.257, 1871.918, 1753.829,
+                        1797.379, 1434.261, 1334.311],
+    "tok_sen2l1c@224": [1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 1732.131, 1679.732, 1727.26,
+                        1024.687, 442.165, 1331.411, 1160.419],
+    "tok_sen2rgb@224": [58.767, 47.663, 42.631],
     "tok_sen1grd@224": [5.195, 5.890],
     "tok_sen1rtc@224": [4.391, 4.459],
     "tok_lulc@224": [1],
@@ -191,6 +252,17 @@ v1_5_pretraining_std = {**v1_pretraining_std,
 
 
 tokenizer_dict = {
+    "v1_5": {
+        "tok_sen2l2a@224": terramind_v1_5_tokenizer_s2l2a,
+        "tok_sen2l1c@224": terramind_v1_5_tokenizer_s2l1c,
+        "tok_sen2rgb@224": terramind_v1_5_tokenizer_s2rgb,
+        "tok_sen1rtc@224": terramind_v1_5_tokenizer_s1rtc,
+        "tok_sen1grd@224": terramind_v1_5_tokenizer_s1grd,
+        "tok_dem@224": terramind_v1_5_tokenizer_dem,
+        "tok_lulc@224": terramind_v1_5_tokenizer_lulc,
+        "tok_ndvi@224": terramind_v1_5_tokenizer_ndvi,
+        "tok_naip@224": terramind_v1_5_tokenizer_naip,
+    },
     "v1": {
         "tok_sen2l2a@224": terramind_v1_tokenizer_s2l2a,
         "tok_sen1rtc@224": terramind_v1_tokenizer_s1rtc,
@@ -200,14 +272,14 @@ tokenizer_dict = {
         "tok_ndvi@224": terramind_v1_tokenizer_ndvi,
         "coords": terramind_v1_coords_tokenizer,
     },
-    "v01": {
-        "tok_sen2l2a@224": terramind_v01_tokenizer_s2l2a,
-        "tok_sen1grd@224": terramind_v01_tokenizer_s1grd,
-        "tok_dem@224": terramind_v01_tokenizer_dem,
-        "tok_lulc@224": terramind_v01_tokenizer_lulc,
-        "coords": terramind_v1_coords_tokenizer,
-        "caption": terramind_v01_caption_tokenizer,
-    }
+    # "v01": {
+    #     "tok_sen2l2a@224": terramind_v01_tokenizer_s2l2a,
+    #     "tok_sen1grd@224": terramind_v01_tokenizer_s1grd,
+    #     "tok_dem@224": terramind_v01_tokenizer_dem,
+    #     "tok_lulc@224": terramind_v01_tokenizer_lulc,
+    #     "coords": terramind_v1_coords_tokenizer,
+    #     "caption": terramind_v01_caption_tokenizer,
+    # }
 }
 
 
@@ -345,7 +417,6 @@ def build_terrammind_vit(
         bands: dict[str, list] | None = None,
         pretrained_bands: dict[str, list] | None = None,
         **kwargs):
-
     model = TerraMindViT(pretrained=pretrained, **kwargs)
 
     if ckpt_path is not None:
@@ -376,7 +447,6 @@ def build_terrammind_encdec(
         pretrained: bool = False,
         ckpt_path: str | None = None,
         **kwargs):
-
     model = TerraMind(**kwargs)
 
     if ckpt_path is not None:
@@ -406,7 +476,6 @@ def build_terrammind_tim(
         bands: dict[str, list] | None = None,
         pretrained_bands: dict[str, list] | None = None,
         **kwargs):
-
     model = TerraMindTiM(pretrained=pretrained, **kwargs)
 
     if bands is not None:
@@ -445,7 +514,6 @@ def build_terrammind_generate(
         pretrained: bool = False,
         ckpt_path: str | None = None,
         **kwargs):
-
     model = TerraMindGeneration(pretrained=pretrained, **kwargs)
 
     if ckpt_path is not None:
@@ -489,7 +557,7 @@ def terramind_v1_base(**kwargs):
     )
     return model
 
-      
+
 @TERRATORCH_BACKBONE_REGISTRY.register
 def terramind_v1_base_tim(**kwargs):
     model = build_terrammind_tim(
@@ -819,6 +887,98 @@ def terramind_v1_tiny_generate(**kwargs):
         pretraining_mean=v1_pretraining_mean,
         pretraining_std=v1_pretraining_std,
         tokenizer_dict=tokenizer_dict['v1'],
+        **kwargs
+    )
+    return model
+
+
+@TERRATORCH_FULL_MODEL_REGISTRY.register
+def terramind_v1_5_tiny_generate(**kwargs):
+    model = build_terrammind_generate(
+        variant="terramind_v1_5_tiny",
+        encoder_depth=12,
+        decoder_depth=4,
+        dim=192,
+        num_heads=3,
+        mlp_ratio=4,
+        qkv_bias=True,
+        proj_bias=True,
+        mlp_bias=True,
+        num_register_tokens=0,
+        norm_layer=partial(LayerNorm, eps=1e-6, bias=False),
+        act_layer=nn.GELU,
+        gated_mlp=False,
+        pretraining_mean=v1_pretraining_mean,
+        pretraining_std=v1_pretraining_std,
+        tokenizer_dict=tokenizer_dict['v1_5'],
+        **kwargs
+    )
+    return model
+
+
+
+@TERRATORCH_BACKBONE_REGISTRY.register
+def terramind_v1_5_tiny(**kwargs):
+    model = build_terrammind_vit(
+        variant="terramind_v1_5_tiny",
+        encoder_depth=12,
+        dim=192,
+        num_heads=3,
+        mlp_ratio=4,
+        qkv_bias=True,
+        proj_bias=True,
+        mlp_bias=True,
+        num_register_tokens=0,
+        norm_layer=partial(LayerNorm, eps=1e-6, bias=False),
+        act_layer=nn.GELU,
+        gated_mlp=False,
+        pretrained_bands=PRETRAINED_BANDS,
+        tokenizer_dict=tokenizer_dict['v1'],
+        **kwargs
+    )
+    return model
+
+
+@TERRATORCH_BACKBONE_REGISTRY.register
+def terramind_v1_5_tiny_tim(**kwargs):
+    model = build_terrammind_tim(
+        variant="terramind_v1_5_tiny",
+        encoder_depth=12,
+        decoder_depth=4,
+        dim=192,
+        num_heads=3,
+        mlp_ratio=4,
+        qkv_bias=True,
+        proj_bias=True,
+        mlp_bias=True,
+        num_register_tokens=0,
+        norm_layer=partial(LayerNorm, eps=1e-6, bias=False),
+        act_layer=nn.GELU,
+        gated_mlp=False,
+        pretrained_bands=PRETRAINED_BANDS,
+        tokenizer_dict=tokenizer_dict['v1'],
+        **kwargs
+    )
+    return model
+
+
+@TERRATORCH_FULL_MODEL_REGISTRY.register
+def terramind_v1_5_tiny_encdec(**kwargs):
+    model = build_terrammind_encdec(
+        variant="terramind_v1_5_tiny",
+        encoder_depth=12,
+        decoder_depth=4,
+        dim=192,
+        num_heads=3,
+        mlp_ratio=4,
+        qkv_bias=True,
+        proj_bias=True,
+        mlp_bias=True,
+        num_register_tokens=0,
+        norm_layer=partial(LayerNorm, eps=1e-6, bias=False),
+        act_layer=nn.GELU,
+        gated_mlp=False,
+        pretrained_bands=PRETRAINED_BANDS,
         **kwargs
     )
     return model
