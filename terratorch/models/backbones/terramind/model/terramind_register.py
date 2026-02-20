@@ -82,8 +82,9 @@ pretrained_weights = {
         "hf_hub_filename": "TerraMind_v1_tiny.pt",
     },
     "terramind_v1_5_tiny": {
-        "hf_hub_id": "FAST-EO/TerraMind-1.5-tiny",
-        "hf_hub_filename": "TerraMind_v1_5_tiny.pt",
+        # "hf_hub_id": "FAST-EO/TerraMind-1.5-tiny",
+        # "hf_hub_filename": "TerraMind_v1_5_tiny.pt",
+        "path": "/Users/jja/Documents/02_EOFM/TerraMind-Pretraining/checkpoints/v1_5_2/TerraMind_v1_5_tiny_checkpoint_2.pt",
     },
     "terramind_v1_small": {
         "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-small",
@@ -527,8 +528,10 @@ def build_terrammind_generate(
 
     elif pretrained:
         # Load model from Hugging Face
-        state_dict_file = hf_hub_download(repo_id=pretrained_weights[variant]["hf_hub_id"],
-                                          filename=pretrained_weights[variant]["hf_hub_filename"])
+        # state_dict_file = hf_hub_download(repo_id=pretrained_weights[variant]["hf_hub_id"],
+        #                                   filename=pretrained_weights[variant]["hf_hub_filename"])
+        print(pretrained_weights[variant]["path"])
+        state_dict_file = pretrained_weights[variant]["path"]
         state_dict = torch.load(state_dict_file, map_location="cpu", weights_only=True)
         state_dict = checkpoint_filter_fn_generate(state_dict, model)
         model.load_state_dict(state_dict, strict=True)

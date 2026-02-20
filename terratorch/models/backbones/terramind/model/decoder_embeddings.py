@@ -193,6 +193,7 @@ class ImageTokenDecoderEmbedding(nn.Module):
         sincos_pos_emb: bool = True,
         image_size: Union[int, Tuple[int]] = 224,
         share_embedding: bool = True,
+        num_codebooks: int = 128,
         **kwargs,
     ):
         super().__init__()
@@ -205,6 +206,7 @@ class ImageTokenDecoderEmbedding(nn.Module):
             self.image_size[1] // self.patch_size[1]
         )
         self.share_embedding = share_embedding
+        self.num_codebooks = num_codebooks
 
         if self.dim_tokens is not None:
             self.init(dim_tokens=dim_tokens)
@@ -243,8 +245,22 @@ class ImageTokenDecoderEmbedding(nn.Module):
             num_embeddings=self.vocab_size, embedding_dim=self.dim_tokens
         )
 
-        # Output projection layer
-        self.to_logits = nn.Linear(self.dim_tokens, self.vocab_size, bias=False)
+        # Output projection layers - one per codebook for multi-codebook support
+        if self.num_codebooks == 1:
+            self.to_logits = nn.Linear(self.dim_tokens, self.vocab_size, bias=False)
+            if self.share_embedding:
+                self.to_logits.weight = self.token_emb.weight
+        else:
+            # Multi-codebook: create separate projection heads for each codebook
+            # Each head predicts one codebook from the summed embedding representation
+            self.to_logits = nn.ModuleList([
+                nn.Linear(self.dim_tokens, self.vocab_size, bias=False)
+                for _ in range(self.num_codebooks)
+            ])
+            if self.share_embedding:
+                # Share embedding weights with all projection heads
+                for head in self.to_logits:
+                    head.weight = self.token_emb.weight
 
         if self.share_embedding:
             # Share input and output embedding weights
@@ -286,14 +302,31 @@ class ImageTokenDecoderEmbedding(nn.Module):
         return d
 
     def forward_logits(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through output projection layer, transforming sequence of embeddings to logits.
+        """Forward pass through output projection layer, transforming sequence of embeddings to logits.
+
+        For multi-codebook VQ-VAE, this predicts all codebooks from the unified embedding representation.
 
         Args:
             x (torch.Tensor): Output tokens from the decoder. Shape (B, M, D)
 
         Returns:
-            torch.Tensor: Logits for each token in the sequence. Shape (B, M, V)
+            torch.Tensor: Logits for each token in the sequence.
+                - Single codebook: Shape (B, M, V)
+                - Multi-codebook: Shape (B, M, num_codebooks, V)
         """
-        logits = self.to_logits(x)
+        if self.num_codebooks == 1:
+            # Single codebook: standard output
+            logits = self.to_logits(x)  # Shape: (B, M, V)
+        else:
+            # Multi-codebook: predict each codebook from the unified representation
+            # Each projection head predicts one codebook independently
+            # B, M, D = x.shape
+            logits_list = []
+            assert isinstance(self.to_logits, nn.ModuleList), "Expected ModuleList for multi-codebook"
+            for c in range(self.num_codebooks):
+                logits_c = self.to_logits[c](x)  # Shape: (B, M, V)
+                logits_list.append(logits_c)
+            # Stack along codebook dimension
+            logits = torch.stack(logits_list, dim=2)  # Shape: (B, M, num_codebooks, V)
+
         return logits

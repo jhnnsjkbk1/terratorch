@@ -144,7 +144,7 @@ def empty_seq_emb_modality(mod_dict):
     return mod_dict
 
 
-def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, device, s1_id=5):
+def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, num_codebooks, device, s1_id=5):
     """
     Initializes an empty target modality dictionary for a given domain.
     Used to initialize target modality dictionaries for generation.
@@ -152,7 +152,7 @@ def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, de
     if modality_info[domain]['type'] == 'img':
         # Initialize mod dict
         mod_dict = {
-            'tensor': torch.zeros((batch_size, num_tokens), dtype=torch.int64, device=device),
+            'tensor': torch.zeros((batch_size, num_tokens, num_codebooks), dtype=torch.int64, device=device),
             'input_mask': torch.ones((batch_size, num_tokens), dtype=torch.bool, device=device),
             'target_mask': torch.zeros((batch_size, num_tokens), dtype=torch.bool, device=device),
         }
@@ -176,7 +176,7 @@ def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, de
     return mod_dict
 
 
-def init_conditioned_target_modality(mod_dict, modality_info, domain, num_target_tokens, eos_id=3, s1_id=5):
+def init_conditioned_target_modality(mod_dict, modality_info, domain, num_target_tokens, num_codebooks, eos_id=3, s1_id=5):
     batch_size, input_length = mod_dict["tensor"].shape[:2]
     device = mod_dict["tensor"].device
 
@@ -455,28 +455,108 @@ class GenerationSampler(nn.Module):
 
         return logits
 
-    def sample_tokens(self, logits, temperature=1.0, top_k=0.0, top_p=0.0):
-        if np.isclose(temperature, 0, atol=1e-10):
-            samples = torch.argmax(logits, dim=-1)
-            # Since argmax is used, all sampled_probs will be 1 as we're selecting the max probability
-            sampled_probs = torch.ones_like(samples, dtype=torch.get_default_dtype())
-        else:
-            filtered_logits = self.top_k_top_p_filtering(logits, top_k, top_p)
-            probs = F.softmax(filtered_logits / temperature, dim=-1)
-            samples = torch.multinomial(probs, 1)[:, 0]
-            sampled_probs = probs[torch.arange(len(samples)), samples]
-        return samples, sampled_probs
 
-    def sample_tokens_batched(self, logits, temperature=1.0, top_k=0.0, top_p=0.0):
-        if logits.ndim > 2:
-            B, N = logits.shape[0], logits.shape[1]
-            logits = rearrange(logits, 'b n v -> (b n) v')
-            samples, sampled_probs = self.sample_tokens(logits, temperature, top_k, top_p)
-            samples = rearrange(samples, '(b n) -> b n', b=B, n=N)
-            sampled_probs = rearrange(sampled_probs, '(b n) -> b n', b=B, n=N)
-            return samples, sampled_probs
+    @staticmethod
+    def _top_k_top_p_filtering_2d(logits_2d, top_k=0, top_p=0.0, filter_value=-float("inf")):
+        """
+        logits_2d: [B, K] where each row is an independent categorical.
+        Returns filtered logits with -inf applied to masked entries.
+        """
+        B, K = logits_2d.shape
+        if top_k and top_k > 0:
+            top_k = min(top_k, K)
+            # keep top_k per row
+            kth_vals = torch.topk(logits_2d, top_k, dim=-1).values[..., -1].unsqueeze(-1)
+            mask = logits_2d < kth_vals  # True for entries to remove
+            logits_2d = logits_2d.masked_fill(mask, filter_value)
+
+        if top_p and top_p > 0.0:
+            # sort by logit descending
+            sorted_logits, sorted_indices = torch.sort(logits_2d, dim=-1, descending=True)
+            sorted_probs = F.softmax(sorted_logits, dim=-1)
+            cumprobs = sorted_probs.cumsum(dim=-1)
+
+            # mask everything beyond cumulative probability p
+            sorted_mask = cumprobs > top_p
+            # ensure at least one token is kept
+            sorted_mask[..., 0] = False
+
+            # scatter mask back to original indices
+            mask = torch.zeros_like(sorted_mask)
+            mask.scatter_(1, sorted_indices, sorted_mask)
+            logits_2d = logits_2d.masked_fill(mask, filter_value)
+
+        return logits_2d
+
+
+    def sample_tokens(self, logits, temperature=1.0, codebook_size=8, num_codebooks=128, return_sampled_probs=False):
+        """
+        logits: [N, M, K] or [N, K, M]
+          N = number of tokens/patches
+          M = number of codebooks (e.g., 128)
+          K = codebook size (e.g., 8)
+
+        Returns:
+          samples: LongTensor [N, M] with one index in [0..K-1] per codebook
+          sampled_probs: FloatTensor [N, M] with probability of the sampled index
+        """
+        assert logits.dim() == 3, f"Expected 3D logits, got {logits.shape}"
+
+        # Normalize to [N, M, K] so last dim is the categorical per codebook
+        if logits.shape[-2] == codebook_size and logits.shape[-1] == num_codebooks:
+            logits = logits.transpose(-1, -2)  # handles both [N,K,M] and [N,M,K]
+        N, M, K = logits.shape
+        device, dtype = logits.device, logits.dtype
+
+        flat_logits = logits.reshape(N * M, K)
+
+        # Greedy path
+        if torch.isclose(torch.tensor(temperature, device=device, dtype=dtype),
+                         torch.tensor(0.0, device=device, dtype=dtype), atol=1e-10):
+            flat_samples = torch.argmax(flat_logits, dim=-1)
+            flat_sampled_probs = torch.ones_like(flat_samples, dtype=dtype)
+
         else:
-            return self.sample_tokens(logits, temperature, top_k, top_p)
+            probs = F.softmax(flat_logits / temperature, dim=-1)
+            flat_samples = torch.multinomial(probs, num_samples=1).squeeze(-1)
+            if return_sampled_probs:
+                flat_sampled_probs = probs.gather(1, flat_samples.unsqueeze(-1)).squeeze(-1)
+
+        samples = flat_samples.view(N, M)
+        if return_sampled_probs:
+            sampled_probs = flat_sampled_probs.view(N, M)
+            return samples, sampled_probs
+
+        return samples, None
+
+    def sample_tokens_batched(self, logits, temperature=1.0, codebook_size=8, num_codebooks=128, return_sample_probs=False):
+        # Case A: batched multi-codebook logits
+        if logits.dim() == 4:  # [B, N, M, K] or [B, N, K, M]
+            B, N = logits.shape[0], logits.shape[1]
+
+            # normalize to [B, N, M, K] (last dim = K, codebook size)
+            if logits.shape[-2] == codebook_size and logits.shape[-1] == num_codebooks:
+                logits = logits.transpose(-1, -2)  # [B, N, K, M] -> [B, N, M, K]
+
+            # flatten batches/tokens, keep [M, K]
+            flat = logits.reshape(B * N, logits.shape[2], logits.shape[3])  # [(B*N), M, K]
+
+            # sample per codebook -> [(B*N), M]
+            samples = self.sample_tokens(flat, temperature, codebook_size, num_codebooks, return_sample_probs)  # return just samples
+            # reshape back -> [B, N, M]
+            samples = samples.view(B, N, -1)
+            return samples
+
+        # Case B: unbatched multi-codebook logits
+        elif logits.dim() == 3:  # [N, M, K] or [N, K, M]
+            # normalize to [N, M, K]
+            if logits.shape[-2] == codebook_size and logits.shape[-1] == num_codebooks:
+                logits = logits.transpose(-1, -2)
+            return self.sample_tokens(logits, temperature, codebook_size, num_codebooks, return_sample_probs)
+
+        else:
+            # (keep your 2-D text path or raise)
+            return self.sample_tokens(logits, temperature, codebook_size, num_codebooks, return_sample_probs)
 
     def select_tokens(self, logits, num_select, temperature=1.0, top_k=0.0, top_p=0.0, return_all_samples=False):
         samples, sampled_probs = self.sample_tokens(logits, temperature, top_k, top_p)
@@ -487,11 +567,11 @@ class GenerationSampler(nn.Module):
         else:
             return top_samples, top_indices
 
-    def select_tokens_batched(self, logits, num_select, temperature=1.0, top_k=0.0, top_p=0.0,
+    def select_tokens_batched(self, logits, num_select, temperature=1.0, codebook_size=8, num_codebooks=128,
                               return_all_samples=False):
         if logits.ndim > 2:
-            samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k,
-                                                                top_p)  # both of shape (B, N)
+            sampled_probs = True
+            samples, sampled_probs = self.sample_tokens_batched(logits, temperature, codebook_size, num_codebooks, return_sampled_probs)  # both of shape (B, N)
             top_indices = torch.topk(sampled_probs, num_select, dim=-1)[1]
             # Need to switch to gather instead of indexing here
             top_samples = torch.gather(samples, dim=-1, index=top_indices)
@@ -500,7 +580,7 @@ class GenerationSampler(nn.Module):
             else:
                 return top_samples, top_indices
         else:
-            return self.sample_tokens(logits, num_select, temperature, top_k, top_p, return_all_samples)
+            return self.sample_tokens_batched(logits, temperature, codebook_size, num_codebooks, return_sampled_probs)  # both of shape (B, N)
 
     def forward_mask_encoder_generation(self, encoder_mod_dict):
         """Modification of forward_mask_encoder adapted for generation, with support for batching
@@ -877,32 +957,52 @@ class GenerationSampler(nn.Module):
             decoder_mod_dict, target_mod, num_select, seed=seed)
         y = decoder_tokens + decoder_emb
         y = self.model.forward_decoder(y, context, encoder_mask, None)
-        B, N, D = y.shape
+        # B, N, D = y.shape
         logits = self.model.forward_logits(y, decoder_mod_dict, decoder_mod_mask)[target_mod]
-        logits = logits.reshape(B, N, -1)
+        # logits = logits.reshape(B, N, -1)
 
         return logits, mod_pos
 
-    def roar_step_batched(self, mod_dict, target_mod, num_select, temperature, top_k, top_p, seed=None):
+    def roar_step_batched(self, mod_dict, target_mod, num_select, temperature, codebook_size=8, num_codebooks=128, return_sample_probs=False, seed=None):
         """ROAR = Random Order Autoregression"""
 
         logits, mod_pos = self.forward_enc_dec_roar_batched(mod_dict, target_mod, num_select, seed=seed)
 
         # Simple sampling
-        samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k=top_k, top_p=top_p)
+        samples, sampled_probs = self.sample_tokens_batched(logits, temperature, codebook_size, num_codebooks, return_sample_probs)  # both of shape (B, N)
 
         # Update mod dict
         # We rely on scatter for batched operations
         select_pos = mod_pos
-        mod_dict[target_mod]['tensor'] = torch.scatter(mod_dict[target_mod]['tensor'], -1, select_pos, samples)
-        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, select_pos,
-                                                           torch.zeros_like(samples, dtype=torch.bool))
-        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, select_pos,
-                                                            torch.ones_like(samples, dtype=torch.bool))
+        # mod_dict[target_mod]['tensor'] = torch.scatter(mod_dict[target_mod]['tensor'], -1, select_pos, samples)
+        # mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, select_pos,
+        #                                                    torch.zeros_like(samples, dtype=torch.bool))
+        # mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, select_pos,
+        #                                                     torch.ones_like(samples, dtype=torch.bool))
+
+        # select_pos: [B, S]          (positions to write at along token dim)
+        # samples:    [B, S, M]        (one index per codebook per selected token)
+
+        idx3d = select_pos.unsqueeze(-1).expand(-1, -1, samples.shape[-1])  # [B, S, M]
+        samples = samples.unsqueeze(dim=0)
+        mod_dict[target_mod]['tensor'] = torch.scatter(
+            mod_dict[target_mod]['tensor'], dim=1, index=idx3d, src=samples
+        )
+
+        # masks are per token -> use 2-D booleans shaped like select_pos
+        zeros2d = torch.zeros_like(select_pos, dtype=torch.bool)
+        ones2d = torch.ones_like(select_pos, dtype=torch.bool)
+
+        mod_dict[target_mod]['input_mask'] = torch.scatter(
+            mod_dict[target_mod]['input_mask'], dim=1, index=select_pos, src=zeros2d
+        )
+        mod_dict[target_mod]['target_mask'] = torch.scatter(
+            mod_dict[target_mod]['target_mask'], dim=1, index=select_pos, src=ones2d
+        )
 
         return mod_dict
 
-    def guided_roar_step_batched(self, mod_dict, target_mod, num_select, temperature, top_k, top_p,
+    def guided_roar_step_batched(self, mod_dict, target_mod, num_select, temperature,
                                  conditioning=[], guidance_scale=1.0, seed=None):
         """ROAR = Random Order Autoregression"""
 
@@ -925,7 +1025,7 @@ class GenerationSampler(nn.Module):
         logits = logits_uncond + (logits_cond - logits_uncond) * guidance_scale
 
         ### 4 - Simple sampling
-        samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k=top_k, top_p=top_p)
+        samples, sampled_probs = self.sample_tokens_batched(logits, temperature)
 
         ### 5 - Update mod dict
         # We rely on gather / scatter for batched operations
@@ -956,7 +1056,7 @@ class GenerationSampler(nn.Module):
             [w * (logits_cond - logits_uncond) for w, logits_cond in zip(cond_weights, logits_cond_all)]).sum(dim=0)
 
         ### 4 - Simple sampling
-        samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k=top_k, top_p=top_p)
+        samples, sampled_probs = self.sample_tokens_batched(logits, temperature)
 
         ### 5 - Update mod dict
         # We rely on gather / scatter for batched operations
@@ -1208,13 +1308,11 @@ class GenerationSampler(nn.Module):
                 elif scheme.lower() == 'roar':
                     if cfg_scale == 1.0 or len(cfg_conditioning) == 0:
                         mod_dict = self.roar_step_batched(
-                            mod_dict, target_mod, num_select, temperature=temp,
-                            top_k=top_k, top_p=top_p, seed=seed_i
+                            mod_dict, target_mod, num_select, temperature=temp, seed=seed_i
                         )
                     else:
                         mod_dict = self.guided_roar_step_batched(
-                            mod_dict, target_mod, num_select, temperature=temp, top_k=top_k, top_p=top_p,
-                            conditioning=cfg_conditioning, guidance_scale=cfg_scale, seed=seed_i
+                            mod_dict, target_mod, num_select, temperature=temp, conditioning=cfg_conditioning, guidance_scale=cfg_scale, seed=seed_i
                         )
                 else:
                     raise ValueError("Invalid sampling scheme")

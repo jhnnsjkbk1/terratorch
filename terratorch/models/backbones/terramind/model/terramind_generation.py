@@ -31,7 +31,7 @@ from .generate import (
     build_chained_generation_schedules,
     init_full_input_modality,
     init_empty_target_modality,
-    # init_conditioned_target_modality,
+    init_conditioned_target_modality,
 )
 from .terramind import (
     TerraMind,
@@ -247,6 +247,7 @@ class TerraMindGeneration(nn.Module):
         input_dict = {}
         # Default values if no images are provided
         img_num_tokens, image_size = 196, (224, 224)
+        num_codebooks = 128
         for mod, value in d.items():
             if self.mod_name_mapping[mod] in self.image_modalities:
                 input_shape = value.shape
@@ -300,9 +301,9 @@ class TerraMindGeneration(nn.Module):
 
             if mod in input_dict:
                 # Modality in input and target
-                input_dict[mod] = init_conditioned_target_modality(input_dict[mod], MODALITY_INFO, mod, mod_num_tokens)
+                input_dict[mod] = init_conditioned_target_modality(input_dict[mod], MODALITY_INFO, mod, mod_num_tokens, num_codebooks=num_codebooks)
             else:
-                input_dict[mod] = init_empty_target_modality(MODALITY_INFO, mod, batch_size, mod_num_tokens, device)
+                input_dict[mod] = init_empty_target_modality(MODALITY_INFO, mod, batch_size, mod_num_tokens, num_codebooks, device)
 
         # Predict tokens of output modalities
         schedule = build_chained_generation_schedules(
@@ -337,12 +338,8 @@ class TerraMindGeneration(nn.Module):
             tok = out_dict[mod]['tensor']
             if mod in self.output_image_modalities:
                 patch_size = self.tokenizer[mod].patch_size
-                tok = rearrange(tok, "b (nh nw) -> b nh nw",
+                tok = rearrange(tok, "b (nh nw) n_codebooks -> b nh nw n_codebooks",
                                 nh=image_size[0] // patch_size, nw=image_size[1] // patch_size)
-
-                # TODO: Remove this. Was a minimal patch to see if code is working
-                print("[Warn] Repeating to artificially add num_codebook dimension")
-                tok = tok.repeat(128, 1, 1)
 
                 out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
                     tok,

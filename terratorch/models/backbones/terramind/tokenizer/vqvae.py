@@ -518,10 +518,10 @@ class VQVAE(VQ):
             Decoded image tensor of shape B C H W
         """
         quant = self.post_quant_proj(quant)
-        # TODO: This is a minimal patch to make generations run when they miss the num_codebook dimension. Remove it once num_codebooks is there
-        if len(quant.shape) < 4:
-            print("[Warn] Reshaping to artificially add num_codebook dimension")
-            quant = quant.reshape(1, *quant.shape)
+        # # TODO: This is a minimal patch to make generations run when they miss the num_codebook dimension. Remove it once num_codebooks is there
+        # if len(quant.shape) < 4:
+        #     print("[Warn] Reshaping to artificially add num_codebook dimension")
+        #     quant = quant.reshape(1, *quant.shape)
         dec = self.decoder(quant)
         return dec
 
