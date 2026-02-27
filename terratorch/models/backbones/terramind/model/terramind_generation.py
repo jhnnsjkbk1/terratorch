@@ -15,6 +15,7 @@
 import random
 import warnings
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import nn
@@ -247,6 +248,7 @@ class TerraMindGeneration(nn.Module):
         input_dict = {}
         # Default values if no images are provided
         img_num_tokens, image_size = 196, (224, 224)
+        num_codebooks = 128
         for mod, value in d.items():
             if self.mod_name_mapping[mod] in self.image_modalities:
                 input_shape = value.shape
@@ -300,9 +302,9 @@ class TerraMindGeneration(nn.Module):
 
             if mod in input_dict:
                 # Modality in input and target
-                input_dict[mod] = init_conditioned_target_modality(input_dict[mod], MODALITY_INFO, mod, mod_num_tokens)
+                input_dict[mod] = init_conditioned_target_modality(input_dict[mod], MODALITY_INFO, mod, mod_num_tokens, num_codebooks=num_codebooks)
             else:
-                input_dict[mod] = init_empty_target_modality(MODALITY_INFO, mod, batch_size, mod_num_tokens, device)
+                input_dict[mod] = init_empty_target_modality(MODALITY_INFO, mod, batch_size, mod_num_tokens, num_codebooks, device)
 
         # Predict tokens of output modalities
         schedule = build_chained_generation_schedules(
@@ -336,15 +338,45 @@ class TerraMindGeneration(nn.Module):
         for mod in self.output_modalities:
             tok = out_dict[mod]['tensor']
             if mod in self.output_image_modalities:
-                patch_size = self.tokenizer[mod].patch_size
-                tok = rearrange(tok, "b (nh nw) -> b nh nw",
-                                nh=image_size[0] // patch_size, nw=image_size[1] // patch_size)
+                # Determine image geometry and patching consistently
+                H, W = image_size  # ensure you stored (H, W) above; if not, swap here.
+                ps = self.tokenizer[mod].patch_size  # could be int or (ph, pw)
+                if isinstance(ps, (tuple, list)):
+                    ph, pw = ps
+                else:
+                    ph = pw = ps
 
+                nh = H // ph
+                nw = W // pw
+
+                tok = out_dict[mod]["tensor"]  # expected (B, T, n_codebooks) or (B, n_codebooks, T)
+
+                # Validate T == nh*nw
+                if tok.ndim == 3:
+                    if tok.shape[1] == nh * nw and tok.shape[2] > 1:
+                        # (B, T, n_codebooks)
+                        tok = rearrange(tok, "b (nh nw) n_codebooks -> b nh nw n_codebooks", nh=nh, nw=nw)
+
+                    elif tok.shape[2] == nh * nw and tok.shape[1] > 1:
+                        # (B, n_codebooks, T)
+                        tok = rearrange(tok, "b n_codebooks (nh nw) -> b nh nw n_codebooks", nh=nh, nw=nw)
+                    else:
+                        raise ValueError(
+                            f"Unexpected token shape {tuple(tok.shape)} for nh={nh}, nw={nw} (H={H}, W={W}, ph={ph}, pw={pw})."
+                        )
+                elif tok.ndim == 2:
+                    # Single-codebook case: (B, T)
+                    if tok.shape[1] != nh * nw:
+                        raise ValueError(
+                            f"T={tok.shape[1]} does not match nh*nw={nh * nw} (H={H}, W={W}, ph={ph}, pw={pw})."
+                        )
+                    tok = rearrange(tok, "b (nh nw) -> b nh nw 1", nh=nh, nw=nw)
+                else:
+                    raise ValueError(f"Unsupported token ndim={tok.ndim}")
+
+                # Now decode with a consistent (H, W)
                 out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
-                    tok,
-                    image_size=image_size,
-                    timesteps=timesteps,
-                    verbose=verbose
+                    tok, image_size=(H, W), verbose=verbose
                 )
 
             elif mod in self.output_modalities and mod in ['caption', 'coords']:

@@ -1,4 +1,4 @@
-# Copyright 2025 IBM Corp.
+# Copyright 2024 EPFL and Apple Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,27 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# ---
-#
-# This project includes code adapted from the original work by EPFL and Apple Inc.,
-# licensed under the Apache License, Version 2.0.
-# Source: https://github.com/apple/ml-4m/
-
+from typing import List, Tuple, Dict, Optional, Union, Any
 from contextlib import nullcontext
 import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
+from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from huggingface_hub import PyTorchModelHubMixin
 
 from .quantizers import (
     VectorQuantizerLucid,
     Memcodes,
     FiniteScalarQuantizer,
+    FSQ
 )
 from .models import vit_models
+# from .models.unet import unet_diffusion
 from .models.unet import unet
 from .models import uvit
 from .models.mlp_models import build_mlp
@@ -42,12 +39,6 @@ from .scheduling import (
 )
 
 from terratorch.models.backbones.terramind.utils import denormalize
-
-try:
-    from diffusers.schedulers.scheduling_utils import SchedulerMixin
-except:
-    # diffusers not available
-    SchedulerMixin = None
 
 
 # If freeze_enc is True, the following modules will be frozen
@@ -97,15 +88,15 @@ class VQ(nn.Module, PyTorchModelHubMixin):
     def __init__(
         self,
         image_size: int = 224,
-        image_size_enc: int | None = None,
+        image_size_enc: Optional[int] = None,
         n_channels: str = 12,
-        n_labels: int | None = None,
+        n_labels: Optional[int] = None,
         enc_type: str = "vit_b_enc",
         patch_proj: bool = True,
         post_mlp: bool = False,
         patch_size: int = 16,
         quant_type: str = "lucid",
-        codebook_size: int | str = 16384,
+        codebook_size: Union[int, str] = 16384,
         num_codebooks: int = 1,
         latent_dim: int = 32,
         norm_codes: bool = True,
@@ -116,8 +107,8 @@ class VQ(nn.Module, PyTorchModelHubMixin):
         code_replacement_policy: str = "batch_random",
         commitment_weight: float = 1.0,
         kmeans_init: bool = False,
-        ckpt_path: str | None = None,
-        ignore_keys: list[str] = [
+        ckpt_path: Optional[str] = None,
+        ignore_keys: List[str] = [
             "decoder",
             "loss",
             "post_quant_conv",
@@ -126,7 +117,7 @@ class VQ(nn.Module, PyTorchModelHubMixin):
         ],
         freeze_enc: bool = False,
         undo_std: bool = False,
-        config: dict[str, object] | None = None,
+        config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         if config is not None:
@@ -187,7 +178,7 @@ class VQ(nn.Module, PyTorchModelHubMixin):
             raise NotImplementedError(f"{enc_type} not implemented.")
 
         # Encoder -> quantizer projection
-        self.quant_proj = torch.nn.Conv2d(self.enc_dim, self.latent_dim, 1)
+        self.quant_proj = torch.nn.Conv2d(self.enc_dim, self.latent_dim,1)
 
         # Init quantizer
         if quant_type == "lucid":
@@ -213,7 +204,12 @@ class VQ(nn.Module, PyTorchModelHubMixin):
                 temperature=1.0,
             )
         elif quant_type == "fsq":
-            self.quantize = FiniteScalarQuantizer(codebook_size=codebook_size)
+            # self.quantize = FiniteScalarQuantizer(codebook_size=codebook_size)
+            levels=list(map(int, codebook_size.split("-")))
+            self.quantize = FSQ(
+                levels=levels,
+                num_codebooks=num_codebooks,
+            )
         else:
             raise ValueError(f"{quant_type} not a valid quant_type.")
 
@@ -246,7 +242,7 @@ class VQ(nn.Module, PyTorchModelHubMixin):
             module.train(mode)
         return self
 
-    def init_from_ckpt(self, path: str, ignore_keys: list[str] = list()) -> "VQ":
+    def init_from_ckpt(self, path: str, ignore_keys: List[str] = list()) -> "VQ":
         """Loads the state_dict from a checkpoint file and initializes the model with it.
         Renames the keys in the state_dict if necessary (e.g. when loading VQ-GAN weights).
 
@@ -332,8 +328,8 @@ class VQ(nn.Module, PyTorchModelHubMixin):
         return x
 
     def encode(
-        self, x: torch.Tensor, *args, **kwargs,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.LongTensor]:
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.LongTensor]:
         """Encodes an input image tensor and quantizes the latent code.
 
         Args:
@@ -348,7 +344,11 @@ class VQ(nn.Module, PyTorchModelHubMixin):
         x = self.prepare_input(x)
         h = self.encoder(x)
         h = self.quant_proj(h)
-        quant, code_loss, tokens = self.quantize(h)
+        if self.quant_type=="fsq":
+            quant, tokens = self.quantize(h)
+            code_loss = torch.Tensor([0.]).to(h.device)
+        else:
+            quant, code_loss, tokens = self.quantize(h)
         return quant, code_loss, tokens
 
     def tokenize(self, x: torch.Tensor) -> torch.LongTensor:
@@ -409,6 +409,7 @@ class VQ(nn.Module, PyTorchModelHubMixin):
             Decoded image tensor of shape B C H W
         """
         quant = self.tokens_to_embedding(tokens)
+
         # Get image size from token shape
         image_size = (kwargs.pop("image_size", None) or
                       (tokens.shape[-2] * self.patch_size, tokens.shape[-1] * self.patch_size))
@@ -416,7 +417,7 @@ class VQ(nn.Module, PyTorchModelHubMixin):
         dec = self.decode_quant(quant, image_size=image_size, **kwargs)
         return dec
 
-    def forward(self, x: torch.Tensor, **kwargs) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass of the encoder and quantizer.
 
         Args:
@@ -451,10 +452,10 @@ class VQVAE(VQ):
     def __init__(
         self,
         dec_type: str = "vit_b_dec",
-        out_conv: bool = False,
         image_size_dec: int = None,
         patch_size_dec: int = None,
-        config: dict[str, object] | None = None,
+        config: Optional[Dict[str, Any]] = None,
+        out_conv: bool = True,
         *args,
         **kwargs,
     ):
@@ -472,7 +473,13 @@ class VQVAE(VQ):
         out_channels = self.n_channels if self.n_labels is None else self.n_labels
         image_size_dec = image_size_dec or self.image_size
         patch_size = patch_size_dec or self.patch_size
-        if "vit" in dec_type:
+        if "unet" in dec_type:
+            self.decoder = getattr(unet, dec_type)(
+                out_channels=out_channels,
+                patch_size=patch_size,
+            )
+            self.dec_dim = self.decoder.model_channels
+        elif "vit" in dec_type:
             self.decoder = getattr(vit_models, dec_type)(
                 out_channels=out_channels,
                 patch_size=patch_size,
@@ -493,6 +500,10 @@ class VQVAE(VQ):
         # Quantizer -> decoder projection
         self.post_quant_proj = torch.nn.Conv2d(self.latent_dim, self.dec_dim, 1)
 
+        enc_params = sum(p.numel() for p in self.encoder.parameters())
+        dec_params = sum(p.numel() for p in self.decoder.parameters())
+        print(f"Encoder params: {enc_params/1000000:.1f}M, Decoder params: {dec_params/1000000:.1f}M")
+
         # Load checkpoint
         if self.ckpt_path is not None:
             self.init_from_ckpt(self.ckpt_path, ignore_keys=self.ignore_keys)
@@ -507,10 +518,14 @@ class VQVAE(VQ):
             Decoded image tensor of shape B C H W
         """
         quant = self.post_quant_proj(quant)
+        # # TODO: This is a minimal patch to make generations run when they miss the num_codebook dimension. Remove it once num_codebooks is there
+        # if len(quant.shape) < 4:
+        #     print("[Warn] Reshaping to artificially add num_codebook dimension")
+        #     quant = quant.reshape(1, *quant.shape)
         dec = self.decoder(quant)
         return dec
 
-    def forward(self, x: torch.Tensor, **kwargs) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass of the encoder, quantizer, and decoder.
 
         Args:
@@ -590,26 +605,20 @@ class DiVAE(VQ):
         cls_free_guidance_dropout: float = 0.0,
         masked_cfg: bool = False,
         masked_cfg_low: int = 0,
-        masked_cfg_high: int | None = None,
-        scheduler: str = "ddim",
-        beta_schedule: str = "linear",
-        prediction_type: str = "sample",
+        masked_cfg_high: Optional[int] = None,
+        scheduler: str = "ddpm",
+        beta_schedule: str = "squaredcos_cap_v2",
+        prediction_type: str = "v_prediction",
         clip_sample: bool = False,
         thresholding: bool = True,
         conditioning: str = "concat",
         dec_transformer_dropout: float = 0.2,
         zero_terminal_snr: bool = True,
-        image_size_dec: int | None = None,
-        config: dict[str, object] | None = None,
+        image_size_dec: Optional[int] = None,
+        config: Optional[Dict[str, Any]] = None,
         *args,
         **kwargs,
     ):
-
-        try:
-            import diffusers
-        except ImportError:
-            raise ImportError("Please install diffusers to use VQVAE with `pip install diffusers==0.20.0`.")
-
         if config is not None:
             config = copy.deepcopy(config)
             self.__init__(**config)
@@ -639,7 +648,7 @@ class DiVAE(VQ):
         # Init diffusion decoder
         image_size_dec = image_size_dec or self.image_size
         if "unet_" in dec_type:
-            self.decoder = getattr(unet, dec_type)(
+            self.decoder = getattr(unet_diffusion, dec_type)(
                 in_channels=self.n_channels,
                 out_channels=self.n_channels,
                 cond_channels=self.latent_dim,
@@ -677,7 +686,7 @@ class DiVAE(VQ):
             self.init_from_ckpt(self.ckpt_path, ignore_keys=self.ignore_keys)
 
     def sample_mask(
-        self, quant: torch.Tensor, low: int = 0, high: int | None = None
+        self, quant: torch.Tensor, low: int = 0, high: Optional[int] = None
     ) -> torch.BoolTensor:
         """Returns a mask of shape B H_Q W_Q, where True = masked-out, False = keep.
 
@@ -706,7 +715,7 @@ class DiVAE(VQ):
 
         return mask
 
-    def _get_pipeline(self, scheduler: SchedulerMixin | None = None) -> PipelineCond:
+    def _get_pipeline(self, scheduler: Optional[SchedulerMixin] = None) -> PipelineCond:
         """Creates a conditional diffusion pipeline with the given scheduler.
 
         Args:
@@ -723,13 +732,13 @@ class DiVAE(VQ):
     def decode_quant(
         self,
         quant: torch.Tensor,
-        timesteps: int = 50,
-        scheduler: SchedulerMixin | None = None,
-        generator: torch.Generator | None = None,
-        image_size: tuple[int, int] | int | None = None,
+        timesteps: Optional[int] = None,
+        scheduler: Optional[SchedulerMixin] = None,
+        generator: Optional[torch.Generator] = None,
+        image_size: Optional[Union[Tuple[int, int], int]] = None,
         verbose: bool = False,
         scheduler_timesteps_mode: str = "trailing",
-        orig_res: torch.LongTensor | tuple[int, int] | None = None,
+        orig_res: Optional[Union[torch.LongTensor, Tuple[int, int]]] = None,
     ) -> torch.Tensor:
         """Decodes quantized latent codes back to an image.
 
@@ -748,8 +757,6 @@ class DiVAE(VQ):
         Returns:
             Decoded image tensor of shape B C H W
         """
-        if scheduler is None:
-            scheduler = self.noise_scheduler
         pipeline = self._get_pipeline(scheduler)
         dec = pipeline(
             quant,
@@ -766,15 +773,15 @@ class DiVAE(VQ):
         """See `decode_quant` for details on the optional args."""
         return super().decode_tokens(tokens, **kwargs)
 
-    def forward(
+    def autoencode(
         self,
         input_clean: torch.Tensor,
-        timesteps: int = 50,
-        scheduler: SchedulerMixin | None = None,
-        generator: torch.Generator | None = None,
+        timesteps: Optional[int] = None,
+        scheduler: Optional[SchedulerMixin] = None,
+        generator: Optional[torch.Generator] = None,
         verbose: bool = True,
         scheduler_timesteps_mode: str = "trailing",
-        orig_res: torch.Tensor | tuple[int, int] | None = None,
+        orig_res: Optional[Union[torch.LongTensor, Tuple[int, int]]] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Autoencodes an input image tensor by encoding it, quantizing the latent code,
@@ -795,9 +802,6 @@ class DiVAE(VQ):
         Returns:
             Reconstructed image tensor of shape B C H W
         """
-        if scheduler is None:
-            scheduler = self.noise_scheduler
-
         pipeline = self._get_pipeline(scheduler)
         quant, _, _ = self.encode(input_clean)
         image_size = input_clean.shape[-1]
@@ -812,14 +816,14 @@ class DiVAE(VQ):
         )
         return dec
 
-    def train_forward(
+    def forward(
         self,
         input_clean: torch.Tensor,
         input_noised: torch.Tensor,
-        timesteps: torch.Tensor |float | int,
-        cond_mask: torch.Tensor | None = None,
-        orig_res: torch.LongTensor | tuple[int, int] | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        timesteps: Union[torch.Tensor, float, int],
+        cond_mask: Optional[torch.Tensor] = None,
+        orig_res: Optional[Union[torch.LongTensor, Tuple[int, int]]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass of the encoder, quantizer, and decoder.
 
         Args:
@@ -827,7 +831,7 @@ class DiVAE(VQ):
               or B H W in case of semantic segmentation. Used for encoding.
             input_noised: Noised input image tensor of shape B C H W. Used as
               input to the diffusion decoder.
-            timesteps: Timesteps for conditioning the diffusion decoder on. Defaults to 50.
+            timesteps: Timesteps for conditioning the diffusion decoder on.
             cond_mask: Optional mask for the diffusion conditioning.
               True = masked-out, False = keep.
             orig_res: The original resolution of the image to condition the diffusion on. Ignored if None.
