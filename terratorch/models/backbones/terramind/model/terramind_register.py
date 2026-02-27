@@ -84,7 +84,7 @@ pretrained_weights = {
     "terramind_v1_5_tiny": {
         # "hf_hub_id": "FAST-EO/TerraMind-1.5-tiny",
         # "hf_hub_filename": "TerraMind_v1_5_tiny.pt",
-        "path": "/Users/jja/Documents/02_EOFM/TerraMind-Pretraining/checkpoints/v1_5_2/TerraMind_v1_5_tiny_checkpoint_2.pt",
+        "path": "/Users/jja/Documents/02_EOFM/TerraMind-Pretraining/output/pretraining/terramind_tiny_pretraining_v1_5_5_jj/checkpoint_18.pt",
     },
     "terramind_v1_small": {
         "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-small",

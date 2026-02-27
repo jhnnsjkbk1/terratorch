@@ -542,10 +542,13 @@ class GenerationSampler(nn.Module):
             flat = logits.reshape(B * N, logits.shape[2], logits.shape[3])  # [(B*N), M, K]
 
             # sample per codebook -> [(B*N), M]
-            samples = self.sample_tokens(flat, temperature, codebook_size, num_codebooks, return_sample_probs)  # return just samples
+            samples, sampled_probs = self.sample_tokens(flat, temperature, codebook_size, num_codebooks, return_sample_probs)
             # reshape back -> [B, N, M]
             samples = samples.view(B, N, -1)
-            return samples
+            if return_sample_probs and sampled_probs is not None:
+                sampled_probs = sampled_probs.view(B, N, -1)
+                return samples, sampled_probs
+            return samples, None
 
         # Case B: unbatched multi-codebook logits
         elif logits.dim() == 3:  # [N, M, K] or [N, K, M]
@@ -668,28 +671,48 @@ class GenerationSampler(nn.Module):
         d = mod_dict[target_mod]
         decoder_tokens_all = torch.zeros_like(d['x']) + self.model.mask_token
         emb_all = d['emb']
-        decoder_mask_all = d['target_mask']
+        decoder_mask_all = d['target_mask']  # shape (B, num_patches) — one bool per patch
         B = decoder_tokens_all.shape[0]  # Get batch size
+
+        # Determine num_codebooks: d['x'] has shape (B, num_patches * num_codebooks, D)
+        num_patches = decoder_mask_all.shape[1]
+        num_tokens_flat = d['x'].shape[1]  # num_patches * num_codebooks
+        num_codebooks = num_tokens_flat // num_patches
+
         mod_mask_all = torch.full_like(d['ids'], self.model.modality_info[target_mod]['id'], dtype=torch.int)
-        mod_pos_all = torch.arange(d['x'].shape[1], device=d['x'].device).unsqueeze(0)
-        mod_pos_all = repeat(mod_pos_all, '1 n -> b n', b=B)  # Added: Expansion for batching
-        # Only keep the first num_select tokens
-        num_decoder_tokens = min(num_select, (~decoder_mask_all[
+        # mod_pos_all tracks patch-level positions (used for scatter-back in roar_step_batched)
+        mod_pos_all = torch.arange(num_patches, device=d['x'].device).unsqueeze(0)
+        mod_pos_all = repeat(mod_pos_all, '1 n -> b n', b=B)
+
+        # Only keep the first num_select patches (mask is per-patch)
+        num_decoder_patches = min(num_select, (~decoder_mask_all[
             0]).sum())  # Adapted for batching / Assumes num_decoder_tokens is the same across the batch
 
         # Add a small random number to the mask so they get sorted in a random way, but keeping the masked tokens first
         mask_rand = torch.rand(decoder_mask_all.shape[1], device=decoder_mask_all.device).unsqueeze(0) * 1e-6
         ids_shuffle = torch.argsort(decoder_mask_all + mask_rand, dim=1)
         # ids_restore = torch.argsort(ids_shuffle, dim=1)
-        # Only keep the first num_select_tokens
-        ids_keep = ids_shuffle[:, :num_decoder_tokens]
+        # Patch-level indices to keep, shape (B, num_decoder_patches)
+        ids_keep_patches = ids_shuffle[:, :num_decoder_patches]
+
+        # Expand patch indices to token indices in the flattened (num_patches * num_codebooks) sequence.
+        # Patch p -> token indices [p*num_codebooks, ..., p*num_codebooks + num_codebooks - 1]
+        # ids_keep_patches: (B, num_decoder_patches) -> ids_keep_tokens: (B, num_decoder_patches * num_codebooks)
+        ids_keep_tokens = (ids_keep_patches.unsqueeze(-1) * num_codebooks +
+                           torch.arange(num_codebooks, device=d['x'].device).unsqueeze(0).unsqueeze(0))
+        ids_keep_tokens = ids_keep_tokens.reshape(B, -1)  # (B, num_decoder_patches * num_codebooks)
 
         decoder_tokens = torch.gather(decoder_tokens_all, dim=1,
-                                      index=repeat(ids_keep, "b n -> b n d", d=decoder_tokens_all.shape[2]))
-        decoder_emb = torch.gather(emb_all, dim=1, index=repeat(ids_keep, "b n -> b n d", d=emb_all.shape[2]))
-        decoder_mask = torch.gather(decoder_mask_all, dim=1, index=ids_keep)
-        mod_mask = torch.gather(mod_mask_all, dim=1, index=ids_keep)
-        mod_pos = torch.gather(mod_pos_all, dim=1, index=ids_keep)
+                                      index=repeat(ids_keep_tokens, "b n -> b n d", d=decoder_tokens_all.shape[2]))
+        decoder_emb = torch.gather(emb_all, dim=1, index=repeat(ids_keep_tokens, "b n -> b n d", d=emb_all.shape[2]))
+        mod_mask = torch.gather(mod_mask_all, dim=1, index=ids_keep_tokens)
+
+        # decoder_mask is per-patch; expand to per-token for zeroing out masked tokens
+        decoder_mask_patches = torch.gather(decoder_mask_all, dim=1, index=ids_keep_patches)
+        decoder_mask = decoder_mask_patches.unsqueeze(-1).expand(-1, -1, num_codebooks).reshape(B, -1)
+
+        # mod_pos stays patch-level (used by roar_step_batched to scatter back into the patch tensor)
+        mod_pos = torch.gather(mod_pos_all, dim=1, index=ids_keep_patches)
 
         decoder_tokens[decoder_mask] = 0.
         decoder_emb[decoder_mask] = 0.
@@ -957,9 +980,9 @@ class GenerationSampler(nn.Module):
             decoder_mod_dict, target_mod, num_select, seed=seed)
         y = decoder_tokens + decoder_emb
         y = self.model.forward_decoder(y, context, encoder_mask, None)
-        # B, N, D = y.shape
+        B, N, D = y.shape
         logits = self.model.forward_logits(y, decoder_mod_dict, decoder_mod_mask)[target_mod]
-        # logits = logits.reshape(B, N, -1)
+        logits = logits.reshape(B, N, -1)
 
         return logits, mod_pos
 
@@ -968,28 +991,26 @@ class GenerationSampler(nn.Module):
 
         logits, mod_pos = self.forward_enc_dec_roar_batched(mod_dict, target_mod, num_select, seed=seed)
 
-        # Simple sampling
-        samples, sampled_probs = self.sample_tokens_batched(logits, temperature, codebook_size, num_codebooks, return_sample_probs)  # both of shape (B, N)
+        # logits: [B, N_patches * num_codebooks, vocab_size]
+        # Flatten codebook tokens into a single sequence for sampling
+        # sample_tokens_batched returns [B, N_patches * num_codebooks]
+        samples, sampled_probs = self.sample_tokens_batched(logits, temperature, codebook_size, num_codebooks, return_sample_probs)
+
+        # samples: [B, N_patches * num_codebooks] -> reshape to [B, N_patches, num_codebooks]
+        B = logits.shape[0]
+        samples = samples.view(B, -1, num_codebooks)  # [B, N_patches, num_codebooks]
 
         # Update mod dict
-        # We rely on scatter for batched operations
+        # select_pos: [B, N_patches]  (patch positions to write at)
+        # samples:    [B, N_patches, num_codebooks]
         select_pos = mod_pos
-        # mod_dict[target_mod]['tensor'] = torch.scatter(mod_dict[target_mod]['tensor'], -1, select_pos, samples)
-        # mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, select_pos,
-        #                                                    torch.zeros_like(samples, dtype=torch.bool))
-        # mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, select_pos,
-        #                                                     torch.ones_like(samples, dtype=torch.bool))
 
-        # select_pos: [B, S]          (positions to write at along token dim)
-        # samples:    [B, S, M]        (one index per codebook per selected token)
-
-        idx3d = select_pos.unsqueeze(-1).expand(-1, -1, samples.shape[-1])  # [B, S, M]
-        samples = samples.unsqueeze(dim=0)
+        idx3d = select_pos.unsqueeze(-1).expand(-1, -1, num_codebooks)  # [B, N_patches, num_codebooks]
         mod_dict[target_mod]['tensor'] = torch.scatter(
             mod_dict[target_mod]['tensor'], dim=1, index=idx3d, src=samples
         )
 
-        # masks are per token -> use 2-D booleans shaped like select_pos
+        # masks are per patch (2D) -> use 2D scatter
         zeros2d = torch.zeros_like(select_pos, dtype=torch.bool)
         ones2d = torch.ones_like(select_pos, dtype=torch.bool)
 
@@ -1025,16 +1046,32 @@ class GenerationSampler(nn.Module):
         logits = logits_uncond + (logits_cond - logits_uncond) * guidance_scale
 
         ### 4 - Simple sampling
-        samples, sampled_probs = self.sample_tokens_batched(logits, temperature)
+        # logits: [B, N_patches * num_codebooks, vocab_size]
+        num_codebooks = 128
+        codebook_size = 8
+        samples, sampled_probs = self.sample_tokens_batched(logits, temperature, codebook_size=codebook_size, num_codebooks=num_codebooks, return_sample_probs=False)
+
+        # samples: [B, N_patches * num_codebooks] -> reshape to [B, N_patches, num_codebooks]
+        B = logits.shape[0]
+        samples = samples.view(B, -1, num_codebooks)  # [B, N_patches, num_codebooks]
 
         ### 5 - Update mod dict
-        # We rely on gather / scatter for batched operations
         select_pos = mod_pos
-        mod_dict[target_mod]['tensor'] = torch.scatter(mod_dict[target_mod]['tensor'], -1, select_pos, samples)
-        mod_dict[target_mod]['input_mask'] = torch.scatter(mod_dict[target_mod]['input_mask'], -1, select_pos,
-                                                           torch.zeros_like(samples, dtype=torch.bool))
-        mod_dict[target_mod]['target_mask'] = torch.scatter(mod_dict[target_mod]['target_mask'], -1, select_pos,
-                                                            torch.ones_like(samples, dtype=torch.bool))
+        # idx3d: [B, N_patches, num_codebooks]
+        idx3d = select_pos.unsqueeze(-1).expand(-1, -1, num_codebooks)
+        mod_dict[target_mod]['tensor'] = torch.scatter(
+            mod_dict[target_mod]['tensor'], dim=1, index=idx3d, src=samples
+        )
+
+        # Masks are per patch (2D), so use 2D scatter
+        zeros2d = torch.zeros_like(select_pos, dtype=torch.bool)
+        ones2d = torch.ones_like(select_pos, dtype=torch.bool)
+        mod_dict[target_mod]['input_mask'] = torch.scatter(
+            mod_dict[target_mod]['input_mask'], dim=1, index=select_pos, src=zeros2d
+        )
+        mod_dict[target_mod]['target_mask'] = torch.scatter(
+            mod_dict[target_mod]['target_mask'], dim=1, index=select_pos, src=ones2d
+        )
 
         return mod_dict
 
@@ -1056,26 +1093,31 @@ class GenerationSampler(nn.Module):
             [w * (logits_cond - logits_uncond) for w, logits_cond in zip(cond_weights, logits_cond_all)]).sum(dim=0)
 
         ### 4 - Simple sampling
-        samples, sampled_probs = self.sample_tokens_batched(logits, temperature)
+        # logits: [B, N_patches * num_codebooks, vocab_size]
+        num_codebooks = 128
+        codebook_size = 8
+        samples, sampled_probs = self.sample_tokens_batched(logits, temperature, codebook_size=codebook_size, num_codebooks=num_codebooks)
+
+        # samples: [B, N_patches * num_codebooks] -> reshape to [B, N_patches, num_codebooks]
+        B = logits.shape[0]
+        samples = samples.view(B, -1, num_codebooks)  # [B, N_patches, num_codebooks]
 
         ### 5 - Update mod dict
-        # We rely on gather / scatter for batched operations
         select_pos = mod_pos
-        uncond_dict[target_mod]['tensor'] = torch.scatter(uncond_dict[target_mod]['tensor'], -1, select_pos, samples)
-        uncond_dict[target_mod]['input_mask'] = torch.scatter(uncond_dict[target_mod]['input_mask'], -1, select_pos,
-                                                              torch.zeros_like(samples, dtype=torch.bool))
-        uncond_dict[target_mod]['target_mask'] = torch.scatter(uncond_dict[target_mod]['target_mask'], -1, select_pos,
-                                                               torch.ones_like(samples, dtype=torch.bool))
+        # idx3d: [B, N_patches, num_codebooks]
+        idx3d = select_pos.unsqueeze(-1).expand(-1, -1, num_codebooks)
+        zeros2d = torch.zeros_like(select_pos, dtype=torch.bool)
+        ones2d = torch.ones_like(select_pos, dtype=torch.bool)
+
+        uncond_dict[target_mod]['tensor'] = torch.scatter(uncond_dict[target_mod]['tensor'], dim=1, index=idx3d, src=samples)
+        uncond_dict[target_mod]['input_mask'] = torch.scatter(uncond_dict[target_mod]['input_mask'], dim=1, index=select_pos, src=zeros2d)
+        uncond_dict[target_mod]['target_mask'] = torch.scatter(uncond_dict[target_mod]['target_mask'], dim=1, index=select_pos, src=ones2d)
+
         # Update conditioning dicts
         for i in range(len(cond_dicts)):
-            cond_dicts[i][target_mod]['tensor'] = torch.scatter(cond_dicts[i][target_mod]['tensor'], -1, select_pos,
-                                                                samples)
-            cond_dicts[i][target_mod]['input_mask'] = torch.scatter(cond_dicts[i][target_mod]['input_mask'], -1,
-                                                                    select_pos,
-                                                                    torch.ones_like(samples, dtype=torch.bool))
-            cond_dicts[i][target_mod]['target_mask'] = torch.scatter(cond_dicts[i][target_mod]['target_mask'], -1,
-                                                                     select_pos,
-                                                                     torch.zeros_like(samples, dtype=torch.bool))
+            cond_dicts[i][target_mod]['tensor'] = torch.scatter(cond_dicts[i][target_mod]['tensor'], dim=1, index=idx3d, src=samples)
+            cond_dicts[i][target_mod]['input_mask'] = torch.scatter(cond_dicts[i][target_mod]['input_mask'], dim=1, index=select_pos, src=ones2d)
+            cond_dicts[i][target_mod]['target_mask'] = torch.scatter(cond_dicts[i][target_mod]['target_mask'], dim=1, index=select_pos, src=zeros2d)
 
         return uncond_dict, cond_dicts
 
