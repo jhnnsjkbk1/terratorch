@@ -12,20 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import os
 import warnings
-
 import torch
+import logging
 from huggingface_hub import hf_hub_download
-
-from terratorch.registry import TERRATORCH_FULL_MODEL_REGISTRY
 
 logger = logging.getLogger("terramind")
 
 try:
     from .vqvae import VQVAE, DiVAE
-
     vqvae_available = True
     import_error = None
 except Exception as e:
@@ -34,8 +30,7 @@ except Exception as e:
     import_error = e
 
 try:
-    from .text.text_tokenizer import CaptionTokenizer, CoordsTokenizer
-
+    from .text.text_tokenizer import CoordsTokenizer, CaptionTokenizer
     tokenizers_available = True
     import_error_tokenizers = None
 except Exception as e:
@@ -46,21 +41,67 @@ except Exception as e:
 
 # Model definitions
 __all__ = [
-    "terramind_v01_caption_tokenizer",
-    "terramind_v01_tokenizer_dem",
-    "terramind_v01_tokenizer_lulc",
-    "terramind_v01_tokenizer_s1grd",
-    "terramind_v01_tokenizer_s2l2a",
-    "terramind_v1_coords_tokenizer",
+    "terramind_v1_5_tokenizer_s2l2a",
+    "terramind_v1_5_tokenizer_s2l1c",
+    "terramind_v1_5_tokenizer_s2rgb",
+    "terramind_v1_5_tokenizer_s1rtc",
+    "terramind_v1_5_tokenizer_s1grd",
+    "terramind_v1_5_tokenizer_dem",
+    "terramind_v1_5_tokenizer_lulc",
+    "terramind_v1_5_tokenizer_ndvi",
+    "terramind_v1_5_tokenizer_naip",
+    "terramind_v1_tokenizer_s2l2a",
+    "terramind_v1_tokenizer_s1rtc",
+    "terramind_v1_tokenizer_s1grd",
     "terramind_v1_tokenizer_dem",
     "terramind_v1_tokenizer_lulc",
     "terramind_v1_tokenizer_ndvi",
-    "terramind_v1_tokenizer_s1grd",
-    "terramind_v1_tokenizer_s1rtc",
-    "terramind_v1_tokenizer_s2l2a",
+    "terramind_v01_tokenizer_s2l2a",
+    "terramind_v01_tokenizer_s1grd",
+    "terramind_v01_tokenizer_dem",
+    "terramind_v01_tokenizer_lulc",
+    "terramind_v01_caption_tokenizer",
+    "terramind_v1_coords_tokenizer",
 ]
 
 pretrained_weights = {
+
+    "terramind_v1_5_tokenizer_s2l2a": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-S2L2A",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_S2L2A.pt",
+    },
+    "terramind_v1_5_tokenizer_s2l1c": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-S2L1C",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_S2L1C.pt",
+    },
+    "terramind_v1_5_tokenizer_s2rgb": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-S2RGB",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_S2RGB.pt",
+    },
+    "terramind_v1_5_tokenizer_s1rtc": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-S1RTC",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_S1RTC.pt",
+    },
+    "terramind_v1_5_tokenizer_s1grd": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-S1GRD",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_S1GRD.pt",
+    },
+    "terramind_v1_5_tokenizer_dem": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-DEM",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_DEM.pt",
+    },
+    "terramind_v1_5_tokenizer_ndvi": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-NDVI",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_NDVI.pt",
+    },
+    "terramind_v1_5_tokenizer_lulc": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-LULC",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_LULC.pt",
+    },
+    "terramind_v1_5_tokenizer_naip": {
+        "hf_hub_id": "FAST-EO/TerraMind-1.5-Tokenizer-NAIP",
+        "hf_hub_filename": "TerraMind_v1.5_Tokenizer_NAIP.pt",
+    },
     "terramind_v1_tokenizer_s2l2a": {
         "hf_hub_id": "ibm-esa-geospatial/TerraMind-1.0-Tokenizer-S2L2A",
         "hf_hub_filename": "TerraMind_Tokenizer_S2L2A.pt",
@@ -111,15 +152,16 @@ pretrained_weights = {
     },
 }
 
-
 def build_vqvae(
-    model_type: str = "divae", variant: str = None, pretrained: bool = False, ckpt_path: str | None = None, **kwargs
-):
+        model_type: str = "divae",
+        variant: str = None,
+        pretrained: bool = False,
+        ckpt_path: str | None = None,
+        **kwargs):
 
     if not vqvae_available:
-        warnings.warn(
-            "Cannot import VQVAE/DiVAE from terramind. \nMake sure to install `pip install diffusers==0.30.0`."
-        )
+        warnings.warn(f"Cannot import VQVAE/DiVAE from terramind. "
+                      f"\nMake sure to install `pip install diffusers==0.30.0`.")
         raise import_error
 
     if model_type == "divae":
@@ -149,7 +191,6 @@ def build_vqvae(
     return model
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v1_tokenizer_s2l2a(**kwargs):
     """
     S2L2A Tokenizer for TerraMind v1.
@@ -170,13 +211,12 @@ def terramind_v1_tokenizer_s2l2a(**kwargs):
         codebook_size="8-8-8-6-5",
         latent_dim=5,
         clip_sample=True,
-        **kwargs,
+        **kwargs
     )
 
     return tokenizer
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v1_tokenizer_s1rtc(**kwargs):
     """
     S1RTC Tokenizer for TerraMind v1.
@@ -198,13 +238,11 @@ def terramind_v1_tokenizer_s1rtc(**kwargs):
         codebook_size="8-8-8-6-5",
         latent_dim=5,
         clip_sample=True,
-        **kwargs,
+        **kwargs
     )
 
     return tokenizer
 
-
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v1_tokenizer_s1grd(**kwargs):
     """
     S1GRD Tokenizer for TerraMind v1.
@@ -226,13 +264,12 @@ def terramind_v1_tokenizer_s1grd(**kwargs):
         codebook_size="8-8-8-6-5",
         latent_dim=5,
         clip_sample=True,
-        **kwargs,
+        **kwargs
     )
 
     return tokenizer
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v1_tokenizer_dem(**kwargs):
     """
     DEM Tokenizer for TerraMind v1.
@@ -254,13 +291,12 @@ def terramind_v1_tokenizer_dem(**kwargs):
         codebook_size="8-8-8-6-5",
         latent_dim=5,
         clip_sample=True,
-        **kwargs,
+        **kwargs
     )
 
     return tokenizer
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v1_tokenizer_lulc(**kwargs):
     """
     LULC Tokenizer for TerraMind v1.
@@ -281,13 +317,14 @@ def terramind_v1_tokenizer_lulc(**kwargs):
         quant_type="fsq",
         codebook_size="7-5-5-5-5",
         latent_dim=5,
-        **kwargs,
+        out_conv=True,
+        **kwargs
     )
 
     return tokenizer
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
+
 def terramind_v1_tokenizer_ndvi(**kwargs):
     """
     NDVI Tokenizer for TerraMind v1.
@@ -309,13 +346,12 @@ def terramind_v1_tokenizer_ndvi(**kwargs):
         codebook_size="8-8-8-6-5",
         latent_dim=5,
         clip_sample=True,
-        **kwargs,
+        **kwargs
     )
 
     return tokenizer
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v01_tokenizer_s2l2a(**kwargs):
     """
     S2L2A Tokenizer for TerraMind v0.1.
@@ -340,13 +376,12 @@ def terramind_v01_tokenizer_s2l2a(**kwargs):
         codebook_size="8-8-8-6-5",
         latent_dim=5,
         clip_sample=True,
-        **kwargs,
+        **kwargs
     )
 
     return tokenizer
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v01_tokenizer_s1grd(**kwargs):
     """
     S1GRD Tokenizer for TerraMind v0.1.
@@ -371,13 +406,12 @@ def terramind_v01_tokenizer_s1grd(**kwargs):
         codebook_size="8-8-8-6-5",
         latent_dim=5,
         clip_sample=True,
-        **kwargs,
+        **kwargs
     )
 
     return tokenizer
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v01_tokenizer_dem(**kwargs):
     """
     DEM Tokenizer for TerraMind v0.1.
@@ -402,13 +436,12 @@ def terramind_v01_tokenizer_dem(**kwargs):
         codebook_size="8-8-8-6-5",
         latent_dim=5,
         clip_sample=True,
-        **kwargs,
+        **kwargs
     )
 
     return tokenizer
 
 
-@TERRATORCH_FULL_MODEL_REGISTRY.register
 def terramind_v01_tokenizer_lulc(**kwargs):
     """
     LULC Tokenizer for TerraMind v0.1.
@@ -433,7 +466,8 @@ def terramind_v01_tokenizer_lulc(**kwargs):
         quant_type="fsq",
         codebook_size="7-5-5-5-5",
         latent_dim=5,
-        **kwargs,
+        out_conv=True,
+        **kwargs
     )
 
     return tokenizer
@@ -441,27 +475,290 @@ def terramind_v01_tokenizer_lulc(**kwargs):
 
 def terramind_v01_caption_tokenizer(pretrained=True, tokenizer_file=None, *args, **kwargs):
     if not tokenizers_available:
-        warnings.warn("Cannot import tokenizers. \nMake sure to install `pip install tokenizers`.")
+        warnings.warn(f"Cannot import tokenizers. "
+                      f"\nMake sure to install `pip install tokenizers`.")
         raise import_error_tokenizers
 
     if pretrained and tokenizer_file is None:
         tokenizer_file = hf_hub_download(
             repo_id=pretrained_weights["terramind_v01_caption_tokenizer"]["hf_hub_id"],
-            filename=pretrained_weights["terramind_v01_caption_tokenizer"]["hf_hub_filename"],
+            filename=pretrained_weights["terramind_v01_caption_tokenizer"]["hf_hub_filename"]
         )
 
-    return CaptionTokenizer(tokenizer_file=tokenizer_file, *args, **kwargs)
+    return CaptionTokenizer(
+        tokenizer_file=tokenizer_file,
+        *args, **kwargs
+    )
 
 
 def terramind_v1_coords_tokenizer(pretrained=True, tokenizer_file=None, *args, **kwargs):
     if not tokenizers_available:
-        warnings.warn("Cannot import tokenizers. \nMake sure to install `pip install tokenizers`.")
+        warnings.warn(f"Cannot import tokenizers. "
+                      f"\nMake sure to install `pip install tokenizers`.")
         raise import_error_tokenizers
 
     if pretrained and tokenizer_file is None:
         tokenizer_file = hf_hub_download(
             repo_id=pretrained_weights["terramind_v1_coords_tokenizer"]["hf_hub_id"],
-            filename=pretrained_weights["terramind_v1_coords_tokenizer"]["hf_hub_filename"],
+            filename=pretrained_weights["terramind_v1_coords_tokenizer"]["hf_hub_filename"]
         )
 
-    return CoordsTokenizer(tokenizer_file=tokenizer_file, *args, **kwargs)
+    return CoordsTokenizer(
+        tokenizer_file=tokenizer_file,
+        *args, **kwargs
+    )
+
+
+def terramind_v1_5_tokenizer_s2l2a(**kwargs):
+    """
+    S2L2A Tokenizer for TerraMind v1.5 with multicodebook (128 codebooks, FSQ with 8 levels).
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_s2l2a",
+        image_size=256,
+        n_channels=12,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+
+    return tokenizer
+
+
+def terramind_v1_5_tokenizer_s2l1c(**kwargs):
+    """
+    S2L1C Tokenizer for TerraMind v1.5.
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_s2l1c",
+        image_size=256,
+        n_channels=13,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+
+    return tokenizer
+
+
+def terramind_v1_5_tokenizer_s2rgb(**kwargs):
+    """
+    S2RGB Tokenizer for TerraMind v1.5.
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_s2rgb",
+        image_size=256,
+        n_channels=3,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+
+    return tokenizer
+
+
+def terramind_v1_5_tokenizer_s1rtc(**kwargs):
+    """
+    LULC Tokenizer for TerraMind v1.5.
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_s1rtc",
+        image_size=256,
+        n_channels=2,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+
+    return tokenizer
+
+
+def terramind_v1_5_tokenizer_s1grd(**kwargs):
+    """
+    LULC Tokenizer for TerraMind v1.5.
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_s1grd",
+        image_size=256,
+        n_channels=2,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+
+    return tokenizer
+
+
+def terramind_v1_5_tokenizer_lulc(**kwargs):
+    """
+    LULC Tokenizer for TerraMind v1.5.
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_lulc",
+        image_size=256,
+        n_channels=10,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+
+
+def terramind_v1_5_tokenizer_dem(**kwargs):
+    """
+    DEM Tokenizer for TerraMind v1.5.
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_dem",
+        image_size=256,
+        n_channels=1,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+
+
+def terramind_v1_5_tokenizer_ndvi(**kwargs):
+    """
+    NDVI Tokenizer for TerraMind v1.5.
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_ndvi",
+        image_size=256,
+        n_channels=1,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+    return tokenizer
+
+
+def terramind_v1_5_tokenizer_naip(**kwargs):
+    """
+    NDVI Tokenizer for TerraMind v1.5.
+    """
+    if kwargs.get("pretrained", False):
+        if not os.getenv("HF_TOKEN", None):
+            warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
+
+    tokenizer = build_vqvae(
+        model_type="vqvae",
+        variant="terramind_v1_5_tokenizer_naip",
+        image_size=256,
+        n_channels=4,
+        encoder_type="vit_b_enc",
+        decoder_type="vit_b_dec",
+        prediction_type="sample",
+        post_mlp=True,
+        patch_size=16,
+        quant_type="fsq",
+        codebook_size="8",
+        num_codebooks=128,
+        latent_dim=128,
+        out_conv=True,
+        **kwargs
+    )
+    return tokenizer
