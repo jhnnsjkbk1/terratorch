@@ -190,9 +190,8 @@ MODALITY_INFO = {
     "tok_sen1grd@224": {
         "input_size": 224,
         "patch_size": 16,
-        "vocab_size": 15360,
-        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=15360),
-        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=15360),
+        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=8, num_codebooks=128),
+        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=8, num_codebooks=128),
         "min_tokens": 0,
         "max_tokens": None,  # Will be set to 196
         "type": "img",
@@ -203,9 +202,8 @@ MODALITY_INFO = {
     "tok_sen1rtc@224": {
         "input_size": 224,
         "patch_size": 16,
-        "vocab_size": 15360,
-        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=15360),
-        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=15360),
+        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=8, num_codebooks=128),
+        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=8, num_codebooks=128),
         "min_tokens": 0,
         "max_tokens": None,  # Will be set to 196
         "type": "img",
@@ -216,9 +214,8 @@ MODALITY_INFO = {
     "tok_sen2l2a@224": {
         "input_size": 224,
         "patch_size": 16,
-        "vocab_size": 15360,
-        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=15360),
-        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=15360),
+        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=8, num_codebooks=128),
+        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=8, num_codebooks=128),
         "min_tokens": 0,
         "max_tokens": None,  # Will be set to 196
         "type": "img",
@@ -229,9 +226,8 @@ MODALITY_INFO = {
     "tok_lulc@224": {
         "input_size": 224,
         "patch_size": 16,
-        "vocab_size": 4375,
-        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=4375),
-        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=4375),
+        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=8, num_codebooks=128),
+        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=8, num_codebooks=128),
         "min_tokens": 0,
         "max_tokens": None,  # Will be set to 196
         "type": "img",
@@ -254,9 +250,8 @@ MODALITY_INFO = {
     "tok_dem@224": {
         "input_size": 224,
         "patch_size": 16,
-        "vocab_size": 15360,
-        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=15360),
-        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=15360),
+        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=8, num_codebooks=128),
+        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=8, num_codebooks=128),
         "min_tokens": 0,
         "max_tokens": None,  # Will be set to 196
         "type": "img",
@@ -267,9 +262,8 @@ MODALITY_INFO = {
     "tok_ndvi@224": {
         "input_size": 224,
         "patch_size": 16,
-        "vocab_size": 15360,
-        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=15360),
-        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=15360),
+        "encoder_embedding": partial(ImageTokenEncoderEmbedding, vocab_size=8, num_codebooks=128),
+        "decoder_embedding": partial(ImageTokenDecoderEmbedding, vocab_size=8, num_codebooks=128),
         "min_tokens": 0,
         "max_tokens": None,  # Will be set to 196
         "type": "img",
