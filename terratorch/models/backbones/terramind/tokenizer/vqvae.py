@@ -33,7 +33,7 @@ from .models import uvit, vit_models
 from .models.mlp_models import build_mlp
 from .models.unet import unet
 from .quantizers import (
-    FiniteScalarQuantizer,
+    FSQ,
     Memcodes,
     VectorQuantizerLucid,
 )
@@ -211,7 +211,11 @@ class VQ(nn.Module, PyTorchModelHubMixin):
                 temperature=1.0,
             )
         elif quant_type == "fsq":
-            self.quantize = FiniteScalarQuantizer(codebook_size=codebook_size)
+            levels=list(map(int, codebook_size.split("-")))
+            self.quantize = FSQ(
+                levels=levels,
+                num_codebooks=num_codebooks,
+            )
         else:
             raise ValueError(f"{quant_type} not a valid quant_type.")
 
