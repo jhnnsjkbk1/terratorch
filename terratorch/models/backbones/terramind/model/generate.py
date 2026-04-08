@@ -145,7 +145,7 @@ def empty_seq_emb_modality(mod_dict):
     return mod_dict
 
 
-def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, device, s1_id=5):
+def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, num_codebooks, device, s1_id=5):
     """
     Initializes an empty target modality dictionary for a given domain.
     Used to initialize target modality dictionaries for generation.
@@ -153,7 +153,7 @@ def init_empty_target_modality(modality_info, domain, batch_size, num_tokens, de
     if modality_info[domain]["type"] == "img":
         # Initialize mod dict
         mod_dict = {
-            "tensor": torch.zeros((batch_size, num_tokens), dtype=torch.int64, device=device),
+            "tensor": torch.zeros((batch_size, num_tokens, num_codebooks), dtype=torch.int64, device=device),
             "input_mask": torch.ones((batch_size, num_tokens), dtype=torch.bool, device=device),
             "target_mask": torch.zeros((batch_size, num_tokens), dtype=torch.bool, device=device),
         }
@@ -436,6 +436,8 @@ class GenerationSampler(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
+        self.save_tokens_path = None
+        self.saved_tokens = {}
 
     def top_k_top_p_filtering(self, logits, top_k=0.0, top_p=0.0):
         # Compatible with batching
@@ -479,12 +481,19 @@ class GenerationSampler(nn.Module):
         return samples, sampled_probs
 
     def sample_tokens_batched(self, logits, temperature=1.0, top_k=0.0, top_p=0.0):
-        if logits.ndim > 2:
+        if logits.ndim == 3:
             B, N = logits.shape[0], logits.shape[1]
             logits = rearrange(logits, "b n v -> (b n) v")
             samples, sampled_probs = self.sample_tokens(logits, temperature, top_k, top_p)
             samples = rearrange(samples, "(b n) -> b n", b=B, n=N)
             sampled_probs = rearrange(sampled_probs, "(b n) -> b n", b=B, n=N)
+            return samples, sampled_probs
+        elif logits.ndim == 4:
+            B, N, num_codebooks = logits.shape[0], logits.shape[1], logits.shape[2]
+            logits = rearrange(logits, "b n c v -> (b n c) v")
+            samples, sampled_probs = self.sample_tokens(logits, temperature, top_k, top_p)
+            samples = rearrange(samples, "(b n c ) -> b n c", b=B, n=N, c=num_codebooks)
+            sampled_probs = rearrange(sampled_probs, "(b n c) -> b n c", b=B, n=N, c=num_codebooks)
             return samples, sampled_probs
         else:
             return self.sample_tokens(logits, temperature, top_k, top_p)
@@ -608,7 +617,7 @@ class GenerationSampler(nn.Module):
         emb_all = d["emb"]
         decoder_mask_all = d["target_mask"]
         B = decoder_tokens_all.shape[0]  # Get batch size
-        mod_mask_all = torch.full_like(d["ids"], self.model.modality_info[target_mod]["id"], dtype=torch.int)
+        mod_mask_all = torch.full_like(d["input_mask"], self.model.modality_info[target_mod]["id"], dtype=torch.int16)
         mod_pos_all = torch.arange(d["x"].shape[1], device=d["x"].device).unsqueeze(0)
         mod_pos_all = repeat(mod_pos_all, "1 n -> b n", b=B)  # Added: Expansion for batching
         # Only keep the first num_select tokens
@@ -948,20 +957,26 @@ class GenerationSampler(nn.Module):
         """ROAR = Random Order Autoregression"""
 
         logits, mod_pos = self.forward_enc_dec_roar_batched(mod_dict, target_mod, num_select, seed=seed)
+        logits = logits.reshape(1, 196, 128, 8)
 
         # Simple sampling
         samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k=top_k, top_p=top_p)
 
+        # Save tokens if path is set
+        if self.save_tokens_path is not None:
+            tokens = torch.argmax(logits, dim=3)
+            tokens = tokens.cpu().numpy()
+            np.save("/Users/jja/Downloads/tokens.npy", tokens, allow_pickle=True)
+
         # Update mod dict
-        # We rely on scatter for batched operations
-        select_pos = mod_pos
-        mod_dict[target_mod]["tensor"] = torch.scatter(mod_dict[target_mod]["tensor"], -1, select_pos, samples)
-        mod_dict[target_mod]["input_mask"] = torch.scatter(
-            mod_dict[target_mod]["input_mask"], -1, select_pos, torch.zeros_like(samples, dtype=torch.bool)
-        )
-        mod_dict[target_mod]["target_mask"] = torch.scatter(
-            mod_dict[target_mod]["target_mask"], -1, select_pos, torch.ones_like(samples, dtype=torch.bool)
-        )
+        mod_dict[target_mod]["tensor"][:, mod_pos] = samples
+        mod_dict[target_mod]["input_mask"][:, mod_pos] = torch.zeros_like(mod_pos, dtype=torch.bool)
+        mod_dict[target_mod]["target_mask"][:, mod_pos] = torch.ones_like(mod_pos, dtype=torch.bool)
+
+        if self.save_tokens_path is not None:
+            tokens = mod_dict[target_mod]["tensor"]
+            tokens = tokens.cpu().numpy()
+            np.save("/Users/jja/Downloads/tokens_mod_dict.npy", tokens, allow_pickle=True)
 
         return mod_dict
 
@@ -1285,7 +1300,7 @@ class GenerationSampler(nn.Module):
 
     @torch.no_grad()
     def generate(
-        self, mod_dict, schedule, top_k=0.0, top_p=0.0, tokenizer=None, verbose=False, seed=None, num_tokens=None
+        self, mod_dict, schedule, top_k=0.0, top_p=0.0, tokenizer=None, verbose=False, seed=None, num_tokens=None, save_tokens_path=None
     ):
         """Generates a sequence of tokens from the input modalities.
         :param mod_dict: Dictionary of modalities.
@@ -1296,9 +1311,12 @@ class GenerationSampler(nn.Module):
         :param tokenizer: Modality tokenizers: dict[domain, module] with each module having an text_tokenizer attribute
         :param verbose: Whether to print progress.
         :param seed: Random seed.
+        :param save_tokens_path: Path to save generated tokens as numpy array.
         :return: Generated mod dict.
         """
-
+        self.save_tokens_path = save_tokens_path
+        self.saved_tokens = {}
+        
         # Input embedding -> tokenizes the modalities - Many are placeholder for now
         mod_dict = copy.deepcopy(mod_dict)
 

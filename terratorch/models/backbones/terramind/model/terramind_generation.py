@@ -219,6 +219,7 @@ class TerraMindGeneration(nn.Module):
         standardize: bool | None = None,
         timesteps: int = None,
         verbose: bool = False,
+        save_tokens_path: str | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """
@@ -226,6 +227,7 @@ class TerraMindGeneration(nn.Module):
 
         Args:
             d (dict, torch.Tensor): Dict of inputs or input tensor with shape (B, C, H, W)
+            save_tokens_path (str, optional): Path to save generated quantized tokens as numpy array
 
             Alternatively, keyword arguments with modality=tensor.
 
@@ -268,7 +270,7 @@ class TerraMindGeneration(nn.Module):
         # Define the initial input
         input_dict = {}
         # Default values if no images are provided
-        img_num_tokens, image_size = 196, (224, 224)
+        img_num_tokens, image_size, num_codebooks = 196, (224, 224), 128
         for mod, value in d.items():
             if self.mod_name_mapping[mod] in self.image_modalities:
                 input_shape = value.shape
@@ -321,7 +323,7 @@ class TerraMindGeneration(nn.Module):
                 # Modality in input and target
                 input_dict[mod] = init_conditioned_target_modality(input_dict[mod], MODALITY_INFO, mod, mod_num_tokens)
             else:
-                input_dict[mod] = init_empty_target_modality(MODALITY_INFO, mod, batch_size, mod_num_tokens, device)
+                input_dict[mod] = init_empty_target_modality(MODALITY_INFO, mod, batch_size, mod_num_tokens, num_codebooks, device)
 
         # Predict tokens of output modalities
         schedule = build_chained_generation_schedules(
@@ -341,28 +343,46 @@ class TerraMindGeneration(nn.Module):
         out_dict = self.sampler.generate(
             input_dict,
             schedule,
-            verbose=False,
+            verbose=verbose,
             seed=random.randint(-(2**31), 2**31 - 1),
             top_p=self.top_p,
             top_k=self.top_k,
             num_tokens=sum(tokens_per_target),
             tokenizer=self.tokenizer,
+            save_tokens_path=save_tokens_path,
         )
+
+        if save_tokens_path is not None:
+            for mod in self.output_modalities:
+                tokens = out_dict[mod]["tensor"]
+                tokens = tokens.cpu().numpy()
+                np.save("/Users/jja/Downloads/tokens_out_dict_v2.npy", tokens, allow_pickle=True)
 
         # TODO Vary timesteps based on codebook diversity
         timesteps = timesteps or self.timesteps
         out = {}
+        
         for mod in self.output_modalities:
             tok = out_dict[mod]["tensor"]
             if mod in self.output_image_modalities:
                 patch_size = self.tokenizer[mod].patch_size
-                tok = rearrange(
-                    tok, "b (nh nw) -> b nh nw", nh=image_size[0] // patch_size, nw=image_size[1] // patch_size
-                )
 
-                out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
-                    tok, image_size=image_size, timesteps=timesteps, verbose=verbose
-                )
+                if num_codebooks == 1:
+                    tok = rearrange(
+                        tok, "b (nh nw) -> b nh nw", nh=image_size[0] // patch_size, nw=image_size[1] // patch_size
+                    )
+
+                    out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
+                        tok, image_size=image_size, timesteps=timesteps, verbose=verbose
+                    )
+                else:
+                    tok = rearrange(
+                        tok, "b (nh nw) c -> b nh nw c", nh=image_size[0] // patch_size, nw=image_size[1] // patch_size, c=num_codebooks
+                    )
+
+                    out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
+                        tok, image_size=image_size, timesteps=timesteps, verbose=verbose
+                    )
 
             elif mod in self.output_modalities and mod in ["caption", "coords"]:
                 out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_text(out_dict)
