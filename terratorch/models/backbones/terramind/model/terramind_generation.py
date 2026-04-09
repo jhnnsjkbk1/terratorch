@@ -267,8 +267,32 @@ class TerraMindGeneration(nn.Module):
 
         # Define the initial input
         input_dict = {}
-        # Default values if no images are provided
-        img_num_tokens, image_size, num_codebooks = 196, (224, 224), 128
+
+        # Derive default values from first output image modality configuration
+        default_mod = next((mod for mod in self.output_modalities if mod in self.output_image_modalities), None)
+
+        if default_mod and default_mod in self.decoder_embeddings:
+            decoder_emb = self.decoder_embeddings[default_mod]
+
+            # Use getattr with defaults for safer attribute access
+            img_num_tokens = getattr(decoder_emb, 'num_patches', 196)
+            image_size = getattr(decoder_emb, 'image_size', (224, 224))
+            num_codebooks = getattr(decoder_emb, 'num_codebooks', 128)
+
+            # Log warning only if any attribute was missing
+            if not all(hasattr(decoder_emb, attr) for attr in ['num_patches', 'image_size', 'num_codebooks']):
+                warnings.warn(
+                    f"Decoder embedding for '{default_mod}' missing some attributes. "
+                    f"Using defaults: num_patches={img_num_tokens}, image_size={image_size}, num_codebooks={num_codebooks}"
+                )
+        else:
+            # No output image modalities configured
+            img_num_tokens, image_size, num_codebooks = 196, (224, 224), 128
+            if default_mod:
+                warnings.warn(
+                    f"Output image modality '{default_mod}' not found in decoder embeddings. Using default values."
+                )
+
         for mod, value in d.items():
             if self.mod_name_mapping[mod] in self.image_modalities:
                 input_shape = value.shape
