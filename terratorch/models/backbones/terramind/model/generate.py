@@ -956,7 +956,13 @@ class GenerationSampler(nn.Module):
         """ROAR = Random Order Autoregression"""
 
         logits, mod_pos = self.forward_enc_dec_roar_batched(mod_dict, target_mod, num_select, seed=seed)
-        logits = logits.reshape(1, 196, 128, 8)
+        B, N = logits.shape[0], logits.shape[1]
+
+        # Get decoder embedding for target modality
+        decoder_emb = self.model.decoder_embeddings[target_mod]
+
+        # Dynamically reshape using decoder embedding properties
+        logits = logits.reshape(B, N, decoder_emb.num_codebooks, decoder_emb.vocab_size)
 
         # Simple sampling
         samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k=top_k, top_p=top_p)
