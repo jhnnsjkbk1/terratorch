@@ -219,7 +219,6 @@ class TerraMindGeneration(nn.Module):
         standardize: bool | None = None,
         timesteps: int = None,
         verbose: bool = False,
-        save_tokens_path: str | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """
@@ -227,7 +226,6 @@ class TerraMindGeneration(nn.Module):
 
         Args:
             d (dict, torch.Tensor): Dict of inputs or input tensor with shape (B, C, H, W)
-            save_tokens_path (str, optional): Path to save generated quantized tokens as numpy array
 
             Alternatively, keyword arguments with modality=tensor.
 
@@ -349,14 +347,7 @@ class TerraMindGeneration(nn.Module):
             top_k=self.top_k,
             num_tokens=sum(tokens_per_target),
             tokenizer=self.tokenizer,
-            save_tokens_path=save_tokens_path,
         )
-
-        if save_tokens_path is not None:
-            for mod in self.output_modalities:
-                tokens = out_dict[mod]["tensor"]
-                tokens = tokens.cpu().numpy()
-                np.save("/Users/jja/Downloads/tokens_out_dict_v2.npy", tokens, allow_pickle=True)
 
         # TODO Vary timesteps based on codebook diversity
         timesteps = timesteps or self.timesteps

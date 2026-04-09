@@ -436,7 +436,6 @@ class GenerationSampler(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
-        self.save_tokens_path = None
         self.saved_tokens = {}
 
     def top_k_top_p_filtering(self, logits, top_k=0.0, top_p=0.0):
@@ -962,21 +961,10 @@ class GenerationSampler(nn.Module):
         # Simple sampling
         samples, sampled_probs = self.sample_tokens_batched(logits, temperature, top_k=top_k, top_p=top_p)
 
-        # Save tokens if path is set
-        if self.save_tokens_path is not None:
-            tokens = torch.argmax(logits, dim=3)
-            tokens = tokens.cpu().numpy()
-            np.save("/Users/jja/Downloads/tokens.npy", tokens, allow_pickle=True)
-
         # Update mod dict
         mod_dict[target_mod]["tensor"][:, mod_pos] = samples
         mod_dict[target_mod]["input_mask"][:, mod_pos] = torch.zeros_like(mod_pos, dtype=torch.bool)
         mod_dict[target_mod]["target_mask"][:, mod_pos] = torch.ones_like(mod_pos, dtype=torch.bool)
-
-        if self.save_tokens_path is not None:
-            tokens = mod_dict[target_mod]["tensor"]
-            tokens = tokens.cpu().numpy()
-            np.save("/Users/jja/Downloads/tokens_mod_dict.npy", tokens, allow_pickle=True)
 
         return mod_dict
 
@@ -1300,7 +1288,7 @@ class GenerationSampler(nn.Module):
 
     @torch.no_grad()
     def generate(
-        self, mod_dict, schedule, top_k=0.0, top_p=0.0, tokenizer=None, verbose=False, seed=None, num_tokens=None, save_tokens_path=None
+        self, mod_dict, schedule, top_k=0.0, top_p=0.0, tokenizer=None, verbose=False, seed=None, num_tokens=None
     ):
         """Generates a sequence of tokens from the input modalities.
         :param mod_dict: Dictionary of modalities.
@@ -1311,12 +1299,9 @@ class GenerationSampler(nn.Module):
         :param tokenizer: Modality tokenizers: dict[domain, module] with each module having an text_tokenizer attribute
         :param verbose: Whether to print progress.
         :param seed: Random seed.
-        :param save_tokens_path: Path to save generated tokens as numpy array.
         :return: Generated mod dict.
         """
-        self.save_tokens_path = save_tokens_path
-        self.saved_tokens = {}
-        
+
         # Input embedding -> tokenizes the modalities - Many are placeholder for now
         mod_dict = copy.deepcopy(mod_dict)
 
