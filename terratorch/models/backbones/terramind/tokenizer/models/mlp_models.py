@@ -1,4 +1,4 @@
-# Copyright 2025 IBM Corp.
+# Copyright 2024 EPFL and Apple Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,22 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# ---
-#
-# This project includes code adapted from the original work by EPFL and Apple Inc.,
-# licensed under the Apache License, Version 2.0.
-# Source: https://github.com/apple/ml-4m/
-
-from einops import rearrange
+from typing import Optional
 from torch import nn
+from einops import rearrange
 
 
 class BottleneckBlock(nn.Module):
     def __init__(self, thin, wide):
-        super().__init__()
+        super(BottleneckBlock, self).__init__()
 
-        self.block = nn.Sequential(nn.Linear(thin, wide), nn.GELU(), nn.Linear(wide, thin))
+        self.block = nn.Sequential(
+            nn.Linear(thin, wide), nn.GELU(), nn.Linear(wide, thin)
+        )
 
     def forward(self, x):
         out = self.block(x)
@@ -36,7 +32,7 @@ class BottleneckBlock(nn.Module):
 
 class StandardMLP(nn.Module):
     def __init__(self, dim_in, dim_out, widths):
-        super().__init__()
+        super(StandardMLP, self).__init__()
         self.dim_in = dim_in
         self.dim_out = dim_out
         self.widths = widths
@@ -76,7 +72,7 @@ class StandardMLP(nn.Module):
 
 class BottleneckMLP(nn.Module):
     def __init__(self, dim_in, dim_out, block_dims):
-        super().__init__()
+        super(BottleneckMLP, self).__init__()
         self.dim_in = dim_in
         self.dim_out = dim_out
         self.block_dims = block_dims
@@ -118,7 +114,10 @@ class BottleneckMLP(nn.Module):
 
 
 def build_mlp(
-    model_id: str = "BottleneckMLP/B_6-Wi_1024", dim_in: int | None = None, dim_out: int | None = None, **kwargs
+    model_id: str = "BottleneckMLP/B_6-Wi_1024",
+    dim_in: Optional[int] = None,
+    dim_out: Optional[int] = None,
+    **kwargs,
 ) -> nn.Module:
     """Constructs an MLP model from a model ID string, see
     "Scaling MLPs: A Tale of Inductive Bias" (https://arxiv.org/abs/2306.13575).

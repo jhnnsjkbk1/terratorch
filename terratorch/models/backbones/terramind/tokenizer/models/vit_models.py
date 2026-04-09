@@ -1,4 +1,4 @@
-# Copyright 2025 IBM Corp.
+# Copyright 2024 EPFL and Apple Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,23 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# ---
-#
-# This project includes code adapted from the original work by EPFL and Apple Inc.,
-# licensed under the Apache License, Version 2.0.
-# Source: https://github.com/apple/ml-4m/
-
-import logging
 import math
 import warnings
 from functools import partial
+from typing import Optional
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+from contextlib import nullcontext
 from einops import rearrange
-from torch import nn
-from torch.amp import autocast
 
 
 def pair(t):
@@ -36,16 +29,20 @@ def pair(t):
 
 def build_2d_sincos_posemb(h, w, embed_dim=1024, temperature=10000.0):
     """Sine-cosine positional embeddings as used in MoCo-v3"""
-    grid_w = torch.arange(w, dtype=torch.get_default_dtype())
-    grid_h = torch.arange(h, dtype=torch.get_default_dtype())
+    grid_w = torch.arange(w, dtype=torch.float32)
+    grid_h = torch.arange(h, dtype=torch.float32)
     grid_w, grid_h = torch.meshgrid(grid_w, grid_h, indexing="ij")
-    assert embed_dim % 4 == 0, "Embed dimension must be divisible by 4 for 2D sin-cos position embedding"
+    assert (
+        embed_dim % 4 == 0
+    ), "Embed dimension must be divisible by 4 for 2D sin-cos position embedding"
     pos_dim = embed_dim // 4
-    omega = torch.arange(pos_dim, dtype=torch.get_default_dtype()) / pos_dim
+    omega = torch.arange(pos_dim, dtype=torch.float32) / pos_dim
     omega = 1.0 / (temperature**omega)
     out_w = torch.einsum("m,d->md", [grid_w.flatten(), omega])
     out_h = torch.einsum("m,d->md", [grid_h.flatten(), omega])
-    pos_emb = torch.cat([torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], dim=1)[None, :, :]
+    pos_emb = torch.cat(
+        [torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], dim=1
+    )[None, :, :]
     pos_emb = rearrange(pos_emb, "b (h w) d -> b d h w", h=h, w=w, d=embed_dim)
     return pos_emb
 
@@ -120,7 +117,9 @@ def drop_path(x, drop_prob: float = 0.0, training: bool = False):
     if drop_prob == 0.0 or not training:
         return x
     keep_prob = 1 - drop_prob
-    shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
+    shape = (x.shape[0],) + (1,) * (
+        x.ndim - 1
+    )  # work with diff dim tensors, not just 2D ConvNets
     random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
     random_tensor.floor_()  # binarize
     output = x.div(keep_prob) * random_tensor
@@ -131,18 +130,25 @@ class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks)."""
 
     def __init__(self, drop_prob=None):
-        super().__init__()
+        super(DropPath, self).__init__()
         self.drop_prob = drop_prob
 
     def forward(self, x):
         return drop_path(x, self.drop_prob, self.training)
 
     def extra_repr(self) -> str:
-        return f"p={self.drop_prob}"
+        return "p={}".format(self.drop_prob)
 
 
 class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.0):
+    def __init__(
+        self,
+        in_features,
+        hidden_features=None,
+        out_features=None,
+        act_layer=nn.GELU,
+        drop=0.0,
+    ):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -178,15 +184,13 @@ class Attention(nn.Module):
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)  # (B, num_heads, N, head_dim)
 
-        y = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
+        x = F.scaled_dot_product_attention(
+            q, k, v,
             dropout_p=self.attn_drop.p if self.training else 0.0,
             scale=self.scale,
         )
 
-        x = y.transpose(1, 2).reshape(B, N, C)
+        x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -214,15 +218,13 @@ class CrossAttention(nn.Module):
         kv = self.kv(context).reshape(B, M, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         k, v = kv[0], kv[1]  # (B, H, M, Dh)
 
-        y = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
+        x = F.scaled_dot_product_attention(
+            q, k, v,
             dropout_p=self.attn_drop.p if self.training else 0.0,
             scale=self.scale,
         )
 
-        x = y.transpose(1, 2).reshape(B, N, C)
+        x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -244,10 +246,21 @@ class Block(nn.Module):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.norm2 = norm_layer(dim)
-        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
+        self.attn = Attention(
+            dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            attn_drop=attn_drop,
+            proj_drop=drop,
+        )
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.mlp = Mlp(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=act_layer,
+            drop=drop,
+        )
 
     def forward(self, x, **kwargs):
         x = x + self.drop_path(self.attn(self.norm1(x)))
@@ -270,20 +283,37 @@ class DecoderBlock(nn.Module):
     ):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.self_attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
+        self.self_attn = Attention(
+            dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            attn_drop=attn_drop,
+            proj_drop=drop,
+        )
         self.cross_attn = CrossAttention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop
+            dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            attn_drop=attn_drop,
+            proj_drop=drop,
         )
         self.query_norm = norm_layer(dim)
         self.context_norm = norm_layer(dim)
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.mlp = Mlp(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=act_layer,
+            drop=drop,
+        )
 
     def forward(self, x, context, **kwargs):
         x = x + self.drop_path(self.self_attn(self.norm1(x)))
-        x = x + self.drop_path(self.cross_attn(self.query_norm(x), self.context_norm(context)))
+        x = x + self.drop_path(
+            self.cross_attn(self.query_norm(x), self.context_norm(context))
+        )
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
@@ -309,7 +339,9 @@ class LayerNorm(nn.Module):
 
     def forward(self, x):
         if self.data_format == "channels_last":
-            return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+            return F.layer_norm(
+                x, self.normalized_shape, self.weight, self.bias, self.eps
+            )
         elif self.data_format == "channels_first":
             u = x.mean(1, keepdim=True)
             s = (x - u).pow(2).mean(1, keepdim=True)
@@ -334,13 +366,15 @@ class ConvNeXtBlock(nn.Module):
 
     def __init__(self, dim, drop_path=0.0, layer_scale_init_value=1e-6):
         super().__init__()
-        self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depthwise conv
-        self.norm = nn.LayerNorm(dim, eps=1e-6)
-        self.pwconv1 = nn.Linear(dim, 4 * dim)  # pointwise/1x1 convs, implemented with linear layers
+        self.dwconv = nn.Conv2d(
+            dim, dim, kernel_size=7, padding=3, groups=dim
+        )  # depthwise conv
+        self.norm = ChannelLastLayerNorm(dim)
+        self.pwconv1 = nn.Conv2d(in_channels=dim, out_channels=4 * dim, kernel_size=1)
         self.act = nn.GELU()
-        self.pwconv2 = nn.Linear(4 * dim, dim)
+        self.pwconv2 = nn.Conv2d(in_channels=4 * dim, out_channels=dim, kernel_size=1)
         self.gamma = (
-            nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True)
+            nn.Parameter(layer_scale_init_value * torch.ones((dim, 1, 1)), requires_grad=True)
             if layer_scale_init_value > 0
             else None
         )
@@ -349,17 +383,74 @@ class ConvNeXtBlock(nn.Module):
     def forward(self, x):
         input = x
         x = self.dwconv(x)
-        x = x.permute(0, 2, 3, 1)  # (N, C, H, W) -> (N, H, W, C)
         x = self.norm(x)
         x = self.pwconv1(x)
         x = self.act(x)
         x = self.pwconv2(x)
         if self.gamma is not None:
             x = self.gamma * x
-        x = x.permute(0, 3, 1, 2)  # (N, H, W, C) -> (N, C, H, W)
 
         x = input + self.drop_path(x)
         return x
+
+
+def icnr_init(weight: torch.Tensor, upsample_factor: int = 2, init=nn.init.kaiming_normal_):
+    """
+    ICNR initialization for sub-pixel convolutions to reduce checkerboard artifacts.
+    weight: [out_c, in_c, k, k] where out_c = out_ch * r^2
+    """
+    out_c, in_c, k1, k2 = weight.shape
+    r = upsample_factor
+    # out channels should be divisible by r^2
+    assert out_c % (r * r) == 0, f"out_channels={out_c} not divisible by r^2={r*r}"
+    new_out_c = out_c // (r * r)
+    # initialize a smaller kernel then tile
+    subkernel = torch.zeros([new_out_c, in_c, k1, k2], device=weight.device, dtype=weight.dtype)
+    init(subkernel)
+    subkernel = subkernel.repeat_interleave(r * r, dim=0)
+    with torch.no_grad():
+        weight.copy_(subkernel)
+    return weight
+
+
+class PixelShuffleUpsample(nn.Module):
+    """
+    Conv (in_ch -> out_ch * r^2) -> PixelShuffle(r) -> optional 3x3 conv cleanup.
+    Produces [B, out_ch, H*r, W*r].
+    """
+    def __init__(self, in_ch: int, out_ch: int, r: int = 2, padding_mode: str = "reflect"):
+        super().__init__()
+        self.r = r
+        self.expand = nn.Conv2d(in_ch, out_ch * (r * r), kernel_size=3, padding=1, padding_mode=padding_mode)
+        # ICNR init to reduce checkerboard patterns
+        icnr_init(self.expand.weight, upsample_factor=r)
+        nn.init.zeros_(self.expand.bias)
+
+        self.shuffle = nn.PixelShuffle(r)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.expand(x)
+        x = self.shuffle(x)
+        return x
+
+
+class ChannelLastLayerNorm(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.ln = nn.LayerNorm(channels, eps=1e-6)
+    def forward(self, x):
+        x = x.permute(0, 2, 3, 1)
+        x = self.ln(x)
+        return x.permute(0, 3, 1, 2)
+
+
+def zero_module(module):
+    """
+    Zero out the parameters of a module and return it.
+    """
+    for p in module.parameters():
+        p.detach().zero_()
+    return module
 
 
 class ViTEncoder(nn.Module):
@@ -406,7 +497,7 @@ class ViTEncoder(nn.Module):
         learnable_pos_emb: bool = False,
         patch_proj: bool = True,
         post_mlp: bool = False,
-        ckpt_path: str | None = None,
+        ckpt_path: Optional[str] = None,
         **ignore_kwargs,
     ):
         super().__init__()
@@ -416,15 +507,17 @@ class ViTEncoder(nn.Module):
         self.dim_tokens = dim_tokens
         self.patch_proj = patch_proj
 
-        assert (self.H % self.P_H == 0) and (self.W % self.P_W == 0), (
-            f"Image sizes {self.H}x{self.W} must be divisible by patch sizes {self.P_H}x{self.P_W}"
-        )
+        assert (self.H % self.P_H == 0) and (
+            self.W % self.P_W == 0
+        ), f"Image sizes {self.H}x{self.W} must be divisible by patch sizes {self.P_H}x{self.P_W}"
 
         N_H = self.H // self.P_H
         N_W = self.W // self.P_W
 
         if sincos_pos_emb:
-            self.pos_emb = build_2d_sincos_posemb(h=N_H, w=N_W, embed_dim=self.dim_tokens)
+            self.pos_emb = build_2d_sincos_posemb(
+                h=N_H, w=N_W, embed_dim=self.dim_tokens
+            )
             self.pos_emb = nn.Parameter(self.pos_emb, requires_grad=learnable_pos_emb)
         else:
             self.pos_emb = nn.Parameter(torch.zeros(1, self.dim_tokens, N_H, N_W))
@@ -439,10 +532,17 @@ class ViTEncoder(nn.Module):
                 stride=(self.P_H, self.P_W),
             )
         else:
-            self.proj = nn.Conv2d(in_channels=self.in_channels, out_channels=self.dim_tokens, kernel_size=1, stride=1)
+            self.proj = nn.Conv2d(
+                in_channels=self.in_channels,
+                out_channels=self.dim_tokens,
+                kernel_size=1,
+                stride=1,
+            )
 
         # Transformer blocks
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        dpr = [
+            x.item() for x in torch.linspace(0, drop_path_rate, depth)
+        ]  # stochastic depth decay rule
         self.blocks = nn.Sequential(
             *[
                 Block(
@@ -461,18 +561,24 @@ class ViTEncoder(nn.Module):
 
         if post_mlp:
             self.norm_mlp = norm_layer(dim_tokens)
-            self.post_mlp = Mlp(dim_tokens, int(mlp_ratio * dim_tokens), act_layer=nn.Tanh)
+            self.post_mlp = Mlp(
+                dim_tokens, int(mlp_ratio * dim_tokens), act_layer=nn.Tanh
+            )
 
         self.apply(self._init_weights)
         for name, m in self.named_modules():
             if isinstance(m, nn.Linear):
                 if "qkv" in name:
                     # treat the weights of Q, K, V separately
-                    val = math.sqrt(6.0 / float(m.weight.shape[0] // 3 + m.weight.shape[1]))
+                    val = math.sqrt(
+                        6.0 / float(m.weight.shape[0] // 3 + m.weight.shape[1])
+                    )
                     nn.init.uniform_(m.weight, -val, val)
                 elif "kv" in name:
                     # treat the weights of K, V separately
-                    val = math.sqrt(6.0 / float(m.weight.shape[0] // 2 + m.weight.shape[1]))
+                    val = math.sqrt(
+                        6.0 / float(m.weight.shape[0] // 2 + m.weight.shape[1])
+                    )
                     nn.init.uniform_(m.weight, -val, val)
 
             if isinstance(m, nn.Conv2d):
@@ -485,7 +591,10 @@ class ViTEncoder(nn.Module):
             print(f"Loading checkpoint from {ckpt_path}")
             ckpt = torch.load(ckpt_path)
             ckpt["model"]["pos_emb"] = rearrange(
-                ckpt["model"]["pos_embed"][:, 1:], "b (nh nw) d -> b d nh nw", nh=N_H, nw=N_W
+                ckpt["model"]["pos_embed"][:, 1:],
+                "b (nh nw) d -> b d nh nw",
+                nh=N_H,
+                nw=N_W,
             )
             ckpt["model"]["proj.weight"] = ckpt["model"]["patch_embed.proj.weight"]
             ckpt["model"]["proj.bias"] = ckpt["model"]["patch_embed.proj.bias"]
@@ -506,7 +615,7 @@ class ViTEncoder(nn.Module):
         """Get number of transformer layers."""
         return len(self.blocks)
 
-    def forward(self, x: torch.Tensor, return_intermediates: bool = False) -> torch.Tensor | list[torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """ViT encoder forward pass.
 
         Args:
@@ -516,59 +625,40 @@ class ViTEncoder(nn.Module):
         Returns:
             Output tensor of shape [B, dim_tokens, N_H, N_W].
         """
-        if x.shape[1] != self.in_channels:
-            # Apply one hot encoding for segmentation inputs
-            if len(x.shape) == 3:
-                x = (
-                    F.one_hot(x.to(torch.long), num_classes=self.in_channels)
-                    .permute(0, 3, 1, 2)
-                    .to(torch.get_default_dtype())
-                )
-            elif len(x.shape) == 4 and x.shape[1] == 1:
-                x = (
-                    F.one_hot(x.to(torch.long).squeeze(1), num_classes=self.in_channels)
-                    .permute(0, 3, 1, 2)
-                    .to(torch.get_default_dtype())
-                )
-            else:
-                raise ValueError(
-                    f"Expect input data with {self.in_channels} classes, found {x.shape}. "
-                    f"Either with class indexes and shape [B, H, W] or one hot encoded [B, C, H, W]."
-                )
-
         # Create patches [B, C, H, W] -> [B, (H*W), C]
         if self.patch_proj:
             B, C, H, W = x.shape
-            assert (H % self.P_H == 0) and (W % self.P_W == 0), (
-                f"Image sizes {H}x{W} must be divisible by patch sizes {self.P_H}x{self.P_W}"
-            )
-            N_H, N_W = H // self.P_H, W // self.P_W  # Number of patches in height and width
+            assert (H % self.P_H == 0) and (
+                W % self.P_W == 0
+            ), f"Image sizes {H}x{W} must be divisible by patch sizes {self.P_H}x{self.P_W}"
+            N_H, N_W = (
+                H // self.P_H,
+                W // self.P_W,
+            )  # Number of patches in height and width
         else:
             B, C, N_H, N_W = x.shape
         x = rearrange(self.proj(x), "b d nh nw -> b (nh nw) d")
 
         if self.pos_emb is not None:
             # Create positional embedding
-            x_pos_emb = F.interpolate(self.pos_emb, size=(N_H, N_W), mode="bicubic", align_corners=False)
+            x_pos_emb = F.interpolate(
+                self.pos_emb, size=(N_H, N_W), mode="bicubic", align_corners=False
+            )
             x_pos_emb = rearrange(x_pos_emb, "b d nh nw -> b (nh nw) d")
             # Add positional embeddings to patches
             x = x + x_pos_emb
 
         # Transformer forward pass
-        out = []
-        for block in self.blocks:
-            x = block(x)
-            out.append(x)
+        x = self.blocks(x)
 
         if hasattr(self, "post_mlp"):
-            with autocast("cuda", enabled=False):
+            with torch.amp.autocast("cuda", enabled=False) if x.is_cuda else nullcontext():
                 x = x.float() + self.post_mlp(self.norm_mlp(x.float()))
-            out[-1] = x
 
         # Reshape into 2D grid
-        out = [rearrange(x, "b (nh nw) d -> b d nh nw", nh=N_H, nw=N_W) for x in out]
+        x = rearrange(x, "b (nh nw) d -> b d nh nw", nh=N_H, nw=N_W)
 
-        return out if return_intermediates else out[-1]
+        return x
 
 
 class ViTDecoder(nn.Module):
@@ -616,7 +706,8 @@ class ViTDecoder(nn.Module):
         learnable_pos_emb: bool = False,
         patch_proj: bool = True,
         post_mlp: bool = False,
-        out_conv: bool = False,
+        out_conv: bool = True,
+        conv_dim: int = 256,
         **ignore_kwargs,
     ):
         super().__init__()
@@ -626,22 +717,26 @@ class ViTDecoder(nn.Module):
         self.dim_tokens = dim_tokens
         self.patch_proj = patch_proj
 
-        assert (self.H % self.P_H == 0) and (self.W % self.P_W == 0), (
-            f"Image sizes {self.H}x{self.W} must be divisible by patch sizes {self.P_H}x{self.P_W}"
-        )
+        assert (self.H % self.P_H == 0) and (
+            self.W % self.P_W == 0
+        ), f"Image sizes {self.H}x{self.W} must be divisible by patch sizes {self.P_H}x{self.P_W}"
 
         N_H = self.H // self.P_H
         N_W = self.W // self.P_W
 
         if sincos_pos_emb:
-            self.pos_emb = build_2d_sincos_posemb(h=N_H, w=N_W, embed_dim=self.dim_tokens)
+            self.pos_emb = build_2d_sincos_posemb(
+                h=N_H, w=N_W, embed_dim=self.dim_tokens
+            )
             self.pos_emb = nn.Parameter(self.pos_emb, requires_grad=learnable_pos_emb)
         else:
             self.pos_emb = nn.Parameter(torch.zeros(1, self.dim_tokens, N_H, N_W))
             trunc_normal_(self.pos_emb, std=0.02)
 
         # Transformer blocks
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        dpr = [
+            x.item() for x in torch.linspace(0, drop_path_rate, depth)
+        ]  # stochastic depth decay rule
         self.blocks = nn.Sequential(
             *[
                 Block(
@@ -659,26 +754,53 @@ class ViTDecoder(nn.Module):
         )
 
         # Tokens -> image output projection
+        if out_conv:
+            if not self.patch_proj:
+                raise NotImplementedError("out_conv only tested for patch projection. Set out_conv=False.")
+            # Skip post mlp and patch proj if output conv blocks are used
+            post_mlp = self.patch_proj = False
+
         if post_mlp:
             self.norm_mlp = norm_layer(dim_tokens)
-            self.post_mlp = Mlp(dim_tokens, int(mlp_ratio * dim_tokens), act_layer=nn.Tanh)
-        if patch_proj:
-            self.out_proj = nn.Linear(dim_tokens, self.out_channels * self.P_H * self.P_W)
-        else:
+            self.post_mlp = Mlp(
+                dim_tokens, int(mlp_ratio * dim_tokens), act_layer=nn.Tanh
+            )
+        if self.patch_proj:
+            self.out_proj = nn.Linear(
+                dim_tokens, self.out_channels * self.P_H * self.P_W
+            )
+        elif not out_conv:
             self.out_proj = nn.Linear(dim_tokens, self.out_channels)
+
         if out_conv:
-            self.out_conv = nn.Sequential(ConvNeXtBlock(dim=self.out_channels), ConvNeXtBlock(dim=self.out_channels))
+            self.out_conv = nn.Sequential(
+                PixelShuffleUpsample(dim_tokens, conv_dim, r=2),
+                ConvNeXtBlock(dim=conv_dim),
+                PixelShuffleUpsample(conv_dim, conv_dim // 2, r=2),
+                ConvNeXtBlock(dim=conv_dim // 2),
+                PixelShuffleUpsample(conv_dim // 2, conv_dim // 4, r=2),
+                ConvNeXtBlock(dim=conv_dim // 4),
+                PixelShuffleUpsample(conv_dim // 4, conv_dim // 8, r=2),
+                ConvNeXtBlock(dim=conv_dim // 8),
+                ChannelLastLayerNorm(conv_dim // 8),
+                nn.GELU(),
+                zero_module(nn.Conv2d(conv_dim // 8, self.out_channels, kernel_size=3, padding=1, padding_mode="reflect"))
+            )
 
         self.apply(self._init_weights)
         for name, m in self.named_modules():
             if isinstance(m, nn.Linear):
                 if "qkv" in name:
                     # treat the weights of Q, K, V separately
-                    val = math.sqrt(6.0 / float(m.weight.shape[0] // 3 + m.weight.shape[1]))
+                    val = math.sqrt(
+                        6.0 / float(m.weight.shape[0] // 3 + m.weight.shape[1])
+                    )
                     nn.init.uniform_(m.weight, -val, val)
                 elif "kv" in name:
                     # treat the weights of K, V separately
-                    val = math.sqrt(6.0 / float(m.weight.shape[0] // 2 + m.weight.shape[1]))
+                    val = math.sqrt(
+                        6.0 / float(m.weight.shape[0] // 2 + m.weight.shape[1])
+                    )
                     nn.init.uniform_(m.weight, -val, val)
 
             if isinstance(m, nn.Conv2d):
@@ -718,7 +840,9 @@ class ViTDecoder(nn.Module):
 
         if self.pos_emb is not None:
             # Create positional embedding
-            x_pos_emb = F.interpolate(self.pos_emb, size=(N_H, N_W), mode="bicubic", align_corners=False)
+            x_pos_emb = F.interpolate(
+                self.pos_emb, size=(N_H, N_W), mode="bicubic", align_corners=False
+            )
             x_pos_emb = rearrange(x_pos_emb, "b d nh nw -> b (nh nw) d")
             # Add positional embeddings to patches
             x = x + x_pos_emb
@@ -729,12 +853,19 @@ class ViTDecoder(nn.Module):
         # Project each token to (C * P_H * P_W)
         if hasattr(self, "post_mlp"):
             x = x + self.post_mlp(self.norm_mlp(x))
-        x = self.out_proj(x)
+        if hasattr(self, "out_proj"):
+            x = self.out_proj(x)
 
         # Reshape sequence of patches into image or output features
         ph, pw = (self.P_H, self.P_W) if self.patch_proj else (1, 1)
         x = rearrange(
-            x, "b (nh nw) (c ph pw) -> b c (nh ph) (nw pw)", nh=N_H, nw=N_W, ph=ph, pw=pw, c=self.out_channels
+            x,
+            "b (nh nw) (c ph pw) -> b c (nh ph) (nw pw)",
+            b=B,
+            nh=N_H,
+            nw=N_W,
+            ph=ph,
+            pw=pw,
         )
 
         # Optional conv layers to reduce patch artifacts
@@ -764,9 +895,9 @@ def vit_s_enc(
         in_channels=in_channels,
         patch_size=patch_size,
         resolution=resolution,
-        dim_tokens=512,
-        depth=8,
-        num_heads=8,
+        dim_tokens=384,
+        depth=12,
+        num_heads=6,
         mlp_ratio=4,
         qkv_bias=True,
         drop_rate=drop_rate,
@@ -866,15 +997,16 @@ def vit_s_dec(
     learnable_pos_emb=False,
     patch_proj=True,
     post_mlp=False,
-    out_conv=False,
+    out_conv=True,
+    **kwargs,
 ):
     model = ViTDecoder(
         out_channels=out_channels,
         patch_size=patch_size,
         resolution=resolution,
-        dim_tokens=512,
-        depth=8,
-        num_heads=8,
+        dim_tokens=384,
+        depth=12,
+        num_heads=6,
         mlp_ratio=4,
         qkv_bias=True,
         drop_rate=drop_rate,
@@ -886,6 +1018,7 @@ def vit_s_dec(
         patch_proj=patch_proj,
         post_mlp=post_mlp,
         out_conv=out_conv,
+        **kwargs,
     )
     return model
 
@@ -902,7 +1035,8 @@ def vit_b_dec(
     learnable_pos_emb=False,
     patch_proj=True,
     post_mlp=False,
-    out_conv=False,
+    out_conv=True,
+    **kwargs,
 ):
     model = ViTDecoder(
         out_channels=out_channels,
@@ -922,6 +1056,7 @@ def vit_b_dec(
         patch_proj=patch_proj,
         post_mlp=post_mlp,
         out_conv=out_conv,
+        **kwargs,
     )
     return model
 
@@ -938,7 +1073,8 @@ def vit_l_dec(
     learnable_pos_emb=False,
     patch_proj=True,
     post_mlp=False,
-    out_conv=False,
+    out_conv=True,
+    **kwargs,
 ):
     model = ViTDecoder(
         out_channels=out_channels,
@@ -958,5 +1094,6 @@ def vit_l_dec(
         patch_proj=patch_proj,
         post_mlp=post_mlp,
         out_conv=out_conv,
+        **kwargs,
     )
     return model

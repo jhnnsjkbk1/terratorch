@@ -387,12 +387,12 @@ class TerraMindGeneration(nn.Module):
             elif mod in self.output_modalities and mod in ["caption", "coords"]:
                 out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_text(out_dict)
 
-        if standardize:
-            for mod, value in out.items():
-                if self.mod_name_mapping[mod] in self.pretraining_mean:
-                    out[mod] = (
-                        value * self.pretraining_std[self.mod_name_mapping[mod]]
-                        + self.pretraining_mean[self.mod_name_mapping[mod]]
-                    )
+        # if standardize:
+        #     for mod, value in out.items():
+        #         if self.mod_name_mapping[mod] in self.pretraining_mean:
+        #             out[mod] = (
+        #                 value * self.pretraining_std[self.mod_name_mapping[mod]]
+        #                 + self.pretraining_mean[self.mod_name_mapping[mod]]
+        #             )
 
         return out
