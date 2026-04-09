@@ -233,8 +233,12 @@ def main():
             input_modality,
             input_data.cpu().numpy(),
             ax=axes[row_idx, col_idx],
-            title=f'{file_name}\nS2L2A Input' if row_idx == 0 else ''
+            title='Input\nS2L2A' if row_idx == 0 else ''
         )
+        # Add file name as y-axis label for first column
+        if col_idx == 0:
+            axes[row_idx, col_idx].set_ylabel(file_name, fontsize=10, rotation=0,
+                                               ha='right', va='center', labelpad=10)
         col_idx += 1
         
         # Generate all target modalities
@@ -275,7 +279,7 @@ def main():
                     target_modality,
                     reconstruction_unstd.cpu().numpy(),
                     ax=axes[row_idx, col_idx],
-                    title=f'{target_modality}\nTokenizer' if row_idx == 0 else ''
+                    title=f'Reconstructed\n{target_modality}' if row_idx == 0 else ''
                 )
             else:
                 # No target file available - leave blank or show message
@@ -286,14 +290,14 @@ def main():
                 )
                 axes[row_idx, col_idx].axis('off')
                 if row_idx == 0:
-                    axes[row_idx, col_idx].set_title(f'{target_modality}\nTokenizer')
+                    axes[row_idx, col_idx].set_title(f'Reconstructed\n{target_modality}')
             
             col_idx += 1
             
             # Plot generated output
             if target_modality in generated:
                 generated_unstd = (
-                    generated[target_modality][0] * std[target_modality] + 
+                    generated[target_modality][0] * std[target_modality] +
                     mean[target_modality]
                 )
                 generated_np = generated_unstd.detach().cpu().numpy()
@@ -302,7 +306,7 @@ def main():
                     target_modality,
                     generated_np,
                     ax=axes[row_idx, col_idx],
-                    title=f'{target_modality}\nGenerated' if row_idx == 0 else ''
+                    title=f'Generated\n{target_modality}' if row_idx == 0 else ''
                 )
             else:
                 axes[row_idx, col_idx].text(
@@ -312,7 +316,7 @@ def main():
                 )
                 axes[row_idx, col_idx].axis('off')
                 if row_idx == 0:
-                    axes[row_idx, col_idx].set_title(f'{target_modality}\nGenerated')
+                    axes[row_idx, col_idx].set_title(f'Generated\n{target_modality}')
             
             col_idx += 1
     

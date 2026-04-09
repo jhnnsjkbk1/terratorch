@@ -187,7 +187,7 @@ def plot_s2(data, ax=None, smooth_quantiles=False, title="", *args, **kwargs):
         ax.axis('off')
 
 
-def plot_s1(data, ax=None, power=False, *args, **kwargs):
+def plot_s1(data, ax=None, power=False, title="", *args, **kwargs):
     if power:
         data = s1_to_power(data)
         rgb = s1_power_to_rgb(data)
@@ -197,13 +197,15 @@ def plot_s1(data, ax=None, power=False, *args, **kwargs):
     if ax is None:
         plt.imshow(rgb)
         plt.axis('off')
+        plt.title(title)
         plt.show()
     else:
         ax.imshow(rgb)
+        ax.set_title(title)
         ax.axis('off')
 
 
-def plot_dem(data, ax=None, *args, **kwargs):
+def plot_dem(data, ax=None, title="", *args, **kwargs):
     if isinstance(data, torch.Tensor):
         # to numpy
         data = data.clone().cpu().numpy()
@@ -222,13 +224,15 @@ def plot_dem(data, ax=None, *args, **kwargs):
     if ax is None:
         plt.imshow(data, vmin=0, vmax=255, cmap='BrBG_r')
         plt.axis('off')
+        plt.title(title)
         plt.show()
     else:
         ax.imshow(data, vmin=0, vmax=255, cmap='BrBG_r')
+        ax.set_title(title)
         ax.axis('off')
 
 
-def plot_lulc(data, ax=None, num_classes=10, *args, **kwargs):
+def plot_lulc(data, ax=None, num_classes=10, title="", *args, **kwargs):
     if isinstance(data, torch.Tensor):
         # to numpy
         data = data.clone().cpu().numpy()
@@ -242,13 +246,15 @@ def plot_lulc(data, ax=None, num_classes=10, *args, **kwargs):
     if ax is None:
         plt.imshow(data, vmin=0, vmax=num_classes-1, cmap=lulc_cmap, interpolation='nearest')
         plt.axis('off')
+        plt.title(title)
         plt.show()
     else:
         ax.imshow(data, vmin=0, vmax=num_classes-1, cmap=lulc_cmap, interpolation='nearest')
+        ax.set_title(title)
         ax.axis('off')
 
 
-def plot_ndvi(data, ax=None, *args, **kwargs):
+def plot_ndvi(data, ax=None, title="", *args, **kwargs):
     if isinstance(data, torch.Tensor):
         # to numpy
         data = data.clone().cpu().numpy()
@@ -259,9 +265,11 @@ def plot_ndvi(data, ax=None, *args, **kwargs):
     if ax is None:
         plt.imshow(data, vmin=-1, vmax=+1, cmap='RdYlGn')
         plt.axis('off')
+        plt.title(title)
         plt.show()
     else:
         ax.imshow(data, vmin=-1, vmax=+1, cmap='RdYlGn')
+        ax.set_title(title)
         ax.axis('off')
 
 
@@ -314,12 +322,12 @@ def plot_modality(modality, data, ax=None, title="", **kwargs):
     if 's2' in modality.lower():
         plot_s2(data, ax=ax, title=title, **kwargs)
     elif 's1' in modality.lower():
-        plot_s1(data, ax=ax, **kwargs)
+        plot_s1(data, ax=ax, title=title, **kwargs)
     elif 'dem' in modality.lower():
-        plot_dem(data, ax=ax, **kwargs)
+        plot_dem(data, ax=ax, title=title, **kwargs)
     elif 'ndvi' in modality.lower():
-        plot_ndvi(data, ax=ax, **kwargs)
+        plot_ndvi(data, ax=ax, title=title, **kwargs)
     elif 'lulc' in modality.lower():
-        plot_lulc(data, ax=ax, **kwargs)
+        plot_lulc(data, ax=ax, title=title, **kwargs)
     elif 'coords' in modality.lower() or 'caption' in modality.lower() or 'text' in modality.lower():
-        plot_text(data, ax=ax, **kwargs)
+        plot_text(data, ax=ax, title=title, **kwargs)
