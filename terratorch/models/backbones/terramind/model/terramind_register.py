@@ -41,6 +41,9 @@ from terratorch.models.backbones.terramind.tokenizer.tokenizer_register import (
     terramind_v1_5_tokenizer_lulc,
     terramind_v1_5_tokenizer_ndvi,
     terramind_v1_5_tokenizer_naip,
+    terramind_v1_5_tokenizer_pe,
+    terramind_v1_5_tokenizer_dinov3_lvd,
+    terramind_v1_5_tokenizer_dinov3_sat
 )
 from terratorch.registry import TERRATORCH_BACKBONE_REGISTRY, TERRATORCH_FULL_MODEL_REGISTRY
 
@@ -239,14 +242,17 @@ v1_5_pretraining_std = {
     "tok_ndvi@224": [0.322],
 }
 
+
 v1_5_pretraining_mean = {**v1_pretraining_mean,
                          "naip@512": [107.20314516608458, 112.38461365995144, 93.28977241378502, 133.816892061648],
                          "untok_lulc@224": [0],
                          "untok_ndvi@224": [0.327],
                          "tok_sen2l1c@224": [2357.089, 2137.385, 2018.788, 2082.986, 2295.651, 2854.537, 3122.849,
                                              3040.56, 3306.481, 1473.847, 506.07, 2472.825, 1838.929],
-                         "tok_sen2rgb@224": [87.271, 80.931, 66.667]
-}
+                         "tok_pe_spatial@224": [127.5, 127.5, 127.5],
+                         "tok_dinov3_7b_lvd@224": [123.675, 116.28, 103.53],
+                         "tok_dinov3_7b_sat@224": [109.65, 104.805, 75.48],
+                         }
 v1_5_pretraining_std = {**v1_pretraining_std,
                         "naip@512": [47.33802657655029, 39.109384320368385, 34.850792207554846, 47.32554578567598],
                         "untok_lulc@224": [1],
@@ -254,8 +260,10 @@ v1_5_pretraining_std = {**v1_pretraining_std,
                         "tok_sen2l1c@224": [1624.683, 1675.806, 1557.708, 1833.702, 1823.738, 1733.977, 1732.131,
                                             1679.732, 1727.26, 1024.687, 442.165, 1331.411, 1160.419],
                         "tok_sen2rgb@224": [58.767, 47.663, 42.631],
-}
-
+                        "tok_pe_spatial@224": [127.5, 127.5, 127.5],
+                        "tok_dinov3_7b_lvd@224": [58.445, 57.22, 57.45],
+                        "tok_dinov3_7b_sat@224": [54.315, 39.78, 36.465],
+                        }
 
 tokenizer_dict = {
     "v1_5": {
@@ -268,6 +276,9 @@ tokenizer_dict = {
         "tok_lulc@224": terramind_v1_5_tokenizer_lulc,
         "tok_ndvi@224": terramind_v1_5_tokenizer_ndvi,
         "tok_naip@224": terramind_v1_5_tokenizer_naip,
+        "tok_pe@224": terramind_v1_5_tokenizer_pe,
+        "tok_dinov3_7b_lvd@224": lambda **kwargs: terramind_v1_5_tokenizer_dinov3_lvd(dino_ckpt_path=None, **kwargs),
+        "tok_dinov3_7b_sat@224": lambda **kwargs: terramind_v1_5_tokenizer_dinov3_sat(dino_ckpt_path=None, **kwargs),
     },
     "v1": {
         "tok_sen2l2a@224": terramind_v1_tokenizer_s2l2a,

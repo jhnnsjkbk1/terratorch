@@ -3,7 +3,10 @@ import torch
 import numpy as np
 import textwrap
 import matplotlib.pyplot as plt
+
 from matplotlib.colors import hex2color, LinearSegmentedColormap
+from sklearn.decomposition import PCA
+from einops import rearrange
 
 # Plotting utils
 COLORBLIND_HEX = ["#000000", "#3171AD", "#469C76", '#83CA70', "#EAE159", "#C07CB8", "#C19368", "#6FB2E4", "#F1F1F1",
@@ -230,6 +233,24 @@ def plot_dem(data, ax=None, title="", *args, **kwargs):
         ax.imshow(data, vmin=0, vmax=255, cmap='BrBG_r')
         ax.set_title(title)
         ax.axis('off')
+
+
+def pca_visualize(features, n_components=3):
+    """
+    Visualizes a feature map using PCA.
+
+    Args:
+        features (torch.Tensor): CxHxW feature map to visualize.
+        n_components (int): Number of PCA components to use.
+    """
+    C, H, W = features.shape
+    features_flat = (
+        rearrange(features.float(), "c h w -> (h w) c").detach().cpu().numpy()
+    )
+    pca = PCA(n_components=n_components)
+    img_pca = rearrange(pca.fit_transform(features_flat), "(h w) c -> h w c", h=H, w=W)
+    img_pca = (img_pca - img_pca.min()) / (img_pca.max() - img_pca.min())
+    return img_pca
 
 
 def plot_lulc(data, ax=None, num_classes=10, title="", *args, **kwargs):

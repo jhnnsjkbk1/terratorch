@@ -27,15 +27,18 @@ from terratorch.models.backbones.terramind.model.terramind_register import (
     tokenizer_dict
 )
 from terramind.vq import get_image_tokenizer
-from terramind.vq.tokenizer_register import (
+from terratorch.models.backbones.terramind.tokenizer.tokenizer_register import (
     terramind_v1_5_tokenizer_s1rtc,
     terramind_v1_5_tokenizer_s2l2a,
     terramind_v1_5_tokenizer_dem,
     terramind_v1_5_tokenizer_ndvi,
     terramind_v1_5_tokenizer_lulc,
+    terramind_v1_5_tokenizer_pe,
+    terramind_v1_5_tokenizer_dinov3_lvd,
+    terramind_v1_5_tokenizer_dinov3_sat,
 )
 from terratorch.models.backbones.terramind.model.terramind_generation import TerraMindGeneration
-from plotting_utils import plot_modality
+from plotting_utils import plot_modality, pca_visualize
 
 
 def setup_device():
@@ -50,7 +53,7 @@ def setup_device():
     return device
 
 
-def load_tokenizer(modality, device):
+def load_tokenizer(modality, device, dino_ckpt_path=None):
     """Load tokenizer for a specific modality."""
     tokenizer_build = {
         'S1RTC': terramind_v1_5_tokenizer_s1rtc,
@@ -58,6 +61,9 @@ def load_tokenizer(modality, device):
         'NDVI': terramind_v1_5_tokenizer_ndvi,
         'DEM': terramind_v1_5_tokenizer_dem,
         'LULC': terramind_v1_5_tokenizer_lulc,
+        'PE': terramind_v1_5_tokenizer_pe,
+        'DINOv3_LVD': lambda **kwargs: terramind_v1_5_tokenizer_dinov3_lvd(dino_ckpt_path=dino_ckpt_path, **kwargs),
+        'DINOv3_SAT': lambda **kwargs: terramind_v1_5_tokenizer_dinov3_sat(dino_ckpt_path=dino_ckpt_path, **kwargs),
     }
     
     model = tokenizer_build[modality](pretrained=True)
@@ -74,11 +80,14 @@ def get_standardization_params(modalities, device):
         'NDVI': 'tok_ndvi@224',
         'DEM': 'tok_dem@224',
         'LULC': 'tok_lulc@224',
+        'PE': 'tok_pe_spatial@224',
+        'DINOv3_LVD': 'tok_dinov3_7b_lvd@224',
+        'DINOv3_SAT': 'tok_dinov3_7b_sat@224',
     }
     
     mean = {
         modality: torch.tensor(
-            v1_5_pretraining_mean[folder_to_mod[modality]], 
+            v1_5_pretraining_mean[folder_to_mod[modality]],
             device=device
         )[None, :, None, None]
         for modality in modalities
@@ -86,7 +95,7 @@ def get_standardization_params(modalities, device):
     
     std = {
         modality: torch.tensor(
-            v1_5_pretraining_std[folder_to_mod[modality]], 
+            v1_5_pretraining_std[folder_to_mod[modality]],
             device=device
         )[None, :, None, None]
         for modality in modalities
@@ -151,11 +160,12 @@ def main():
     
     # Paths
     data_dir = Path("/Users/jja/Documents/02_EOFM/terramind/examples")
-    checkpoint_path = '/Users/jja/Documents/02_EOFM/TerraMind-Pretraining/checkpoints/v1_5/baseline/checkpoint_14.pth'
-    
+    # checkpoint_path = '/Users/jja/Documents/02_EOFM/TerraMind-Pretraining/checkpoints/v1_5/baseline/checkpoint_14.pth'
+    checkpoint_path = '/Users/jja/Documents/02_EOFM/TerraMind-Pretraining/checkpoints/v1_5/pe_dino_ablation/checkpoint_10.pth'
+
     # Modalities
     input_modality = "S2L2A"
-    target_modalities = ["DEM", "NDVI", "LULC", "S1RTC"]
+    target_modalities = ["DEM", "NDVI", "LULC", "S1RTC", "PE", "DINOv3_LVD", "DINOv3_SAT"]
     all_modalities = [input_modality] + target_modalities
     
     print(f"\nProcessing {len(file_names)} files with {len(target_modalities)} target modalities")
@@ -250,10 +260,37 @@ def main():
         for target_modality in target_modalities:
             print(f"    Processing {target_modality}...")
             
+            # Skip if tokenizer not loaded
+            if target_modality not in tokenizers:
+                axes[row_idx, col_idx].text(
+                    0.5, 0.5, f'{target_modality}\nnot available',
+                    ha='center', va='center',
+                    fontsize=10, color='gray'
+                )
+                axes[row_idx, col_idx].axis('off')
+                if row_idx == 0:
+                    axes[row_idx, col_idx].set_title(f'Reconstructed\n{target_modality}')
+                col_idx += 1
+                
+                axes[row_idx, col_idx].text(
+                    0.5, 0.5, f'{target_modality}\nnot available',
+                    ha='center', va='center',
+                    fontsize=10, color='gray'
+                )
+                axes[row_idx, col_idx].axis('off')
+                if row_idx == 0:
+                    axes[row_idx, col_idx].set_title(f'Generated\n{target_modality}')
+                col_idx += 1
+                continue
+            
+            # Feature-based modalities (PE, DINOv3) don't have ground truth files
+            # They are generated from the input image through feature encoders
+            is_feature_modality = target_modality in ['PE', 'DINOv3_LVD', 'DINOv3_SAT']
+            
             # Check if target file exists for tokenizer reconstruction
             target_path = data_dir / target_modality / file_name
             
-            if target_path.exists():
+            if target_path.exists() and not is_feature_modality:
                 # Load target for tokenizer reconstruction
                 target_data, target_standardized = load_and_prepare_image(
                     target_path, target_modality, mean, std, device
@@ -281,6 +318,35 @@ def main():
                     ax=axes[row_idx, col_idx],
                     title=f'Reconstructed\n{target_modality}' if row_idx == 0 else ''
                 )
+            elif is_feature_modality:
+                # Feature modalities: tokenize input through the feature encoder
+                # For PE and DINOv3, the tokenizer includes the feature encoder
+                try:
+                    with torch.no_grad():
+                        # Both PE and DINOv3 need RGB input (bands 3,2,1 from S2L2A)
+                        rgb_data = input_data[[3, 2, 1]]
+                        rgb_std = (rgb_data - mean[target_modality]) / std[target_modality]
+                        
+                        # Tokenize through feature encoder and reconstruct
+                        tokens = tokenizers[target_modality].tokenize(rgb_std)
+                        reconstruction = tokenizers[target_modality].decode_tokens(tokens)
+                        
+                        # Visualize the reconstruction using PCA (features -> RGB)
+                        recon_vis = pca_visualize(reconstruction[0], n_components=3)
+                        axes[row_idx, col_idx].imshow(recon_vis)
+                        axes[row_idx, col_idx].axis('off')
+                        if row_idx == 0:
+                            axes[row_idx, col_idx].set_title(f'Reconstructed\n{target_modality}')
+                except Exception as e:
+                    print(f"      Warning: Could not reconstruct {target_modality}: {e}")
+                    axes[row_idx, col_idx].text(
+                        0.5, 0.5, 'Reconstruction\nfailed',
+                        ha='center', va='center',
+                        fontsize=10, color='orange'
+                    )
+                    axes[row_idx, col_idx].axis('off')
+                    if row_idx == 0:
+                        axes[row_idx, col_idx].set_title(f'Reconstructed\n{target_modality}')
             else:
                 # No target file available - leave blank or show message
                 axes[row_idx, col_idx].text(
@@ -296,18 +362,28 @@ def main():
             
             # Plot generated output
             if target_modality in generated:
-                generated_unstd = (
-                    generated[target_modality][0] * std[target_modality] +
-                    mean[target_modality]
-                )
-                generated_np = generated_unstd.detach().cpu().numpy()
-                
-                plot_modality(
-                    target_modality,
-                    generated_np,
-                    ax=axes[row_idx, col_idx],
-                    title=f'Generated\n{target_modality}' if row_idx == 0 else ''
-                )
+                # For feature modalities, don't unstandardize (they're in feature space)
+                # For other modalities, unstandardize to original scale
+                if is_feature_modality:
+                    # Features are already in the right space, just visualize with PCA
+                    gen_vis = pca_visualize(generated[target_modality][0], n_components=3)
+                    axes[row_idx, col_idx].imshow(gen_vis)
+                    axes[row_idx, col_idx].axis('off')
+                    if row_idx == 0:
+                        axes[row_idx, col_idx].set_title(f'Generated\n{target_modality}')
+                else:
+                    # Unstandardize for regular modalities
+                    generated_unstd = (
+                        generated[target_modality][0] * std[target_modality] +
+                        mean[target_modality]
+                    )
+                    generated_np = generated_unstd.detach().cpu().numpy()
+                    plot_modality(
+                        target_modality,
+                        generated_np,
+                        ax=axes[row_idx, col_idx],
+                        title=f'Generated\n{target_modality}' if row_idx == 0 else ''
+                    )
             else:
                 axes[row_idx, col_idx].text(
                     0.5, 0.5, 'Generation\nfailed',

@@ -820,20 +820,14 @@ def terramind_v1_5_tokenizer_pe(**kwargs):
     return tokenizer
 
 
-def terramind_v1_5_tokenizer_dinov3_lvd(pretrained=False, dino_ckpt_path=None, **kwargs):
+def terramind_v1_5_tokenizer_dinov3_lvd(**kwargs):
     """
     NDVI Tokenizer for TerraMind v1.5.
     """
-    pretrained = kwargs.get("pretrained", False)
+    pretrained = kwargs.pop("pretrained", False)
     if pretrained:
         if not os.getenv("HF_TOKEN", None):
             warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
-
-    if pretrained and dino_ckpt_path is None:
-        raise ValueError("terramind_v1_5_tokenizer_dinov3_lvd requires local DINOv3 checkpoint (dino_ckpt_path).")
-    elif dino_ckpt_path is not None and not os.path.exists(dino_ckpt_path):
-        raise FileNotFoundError(f"dino_ckpt_path {dino_ckpt_path} does not exist.")
-    feature_encoder = DINOv3(model='dinov3_vit7b16', ckpt_path=dino_ckpt_path, pretrained=dino_ckpt_path is not None)
 
     tokenizer = build_vqvae(
         model_type="vqvae",
@@ -851,26 +845,22 @@ def terramind_v1_5_tokenizer_dinov3_lvd(pretrained=False, dino_ckpt_path=None, *
         latent_dim=128,
         post_mlp=False,
         out_conv=False,
-        feature_encoder=feature_encoder,
+        feature_encoder=None,
         pretrained=pretrained,
         **kwargs
     )
     return tokenizer
 
 
-def terramind_v1_5_tokenizer_dinov3_sat(pretrained=False, dino_ckpt_path=None, **kwargs):
+def terramind_v1_5_tokenizer_dinov3_sat(**kwargs):
     """
     NDVI Tokenizer for TerraMind v1.5.
     """
+    pretrained = kwargs.pop("pretrained", False)
+
     if pretrained:
         if not os.getenv("HF_TOKEN", None):
             warnings.warn("TerraMind v1.5 models require a HF_TOKEN with access to model weights.")
-
-    if pretrained and dino_ckpt_path is None:
-        raise ValueError("terramind_v1_5_tokenizer_dinov3_sat requires local DINOv3 checkpoint (dino_ckpt_path).")
-    elif dino_ckpt_path is not None and not os.path.exists(dino_ckpt_path):
-        raise FileNotFoundError(f"dino_ckpt_path {dino_ckpt_path} does not exist.")
-    feature_encoder = DINOv3(model='dinov3_vit7b16', ckpt_path=dino_ckpt_path, pretrained=dino_ckpt_path is not None)
 
     tokenizer = build_vqvae(
         model_type="vqvae",
@@ -888,7 +878,7 @@ def terramind_v1_5_tokenizer_dinov3_sat(pretrained=False, dino_ckpt_path=None, *
         latent_dim=128,
         post_mlp=False,
         out_conv=False,
-        feature_encoder=feature_encoder,
+        feature_encoder=None,
         pretrained=pretrained,
         **kwargs
     )
