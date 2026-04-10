@@ -18,8 +18,10 @@
 # licensed under the Apache License, Version 2.0.
 # Source: https://github.com/apple/ml-4m/
 
+import logging
 import math
 import random
+import warnings
 from functools import partial
 
 import torch
@@ -963,6 +965,12 @@ def build_output_modality_embeddings(modality_info, modalities, img_size=None, d
             key = "caption"
         elif "coord" in modality_renamed:
             key = "coords"
+        elif "pe" in modality_renamed:
+            key = "tok_pe@224"
+        elif "lvd" in modality_renamed:
+            key = "tok_dinov3_7b_lvd@224"
+        elif "sat" in modality_renamed:
+            key = "tok_dinov3_7b_sat@224"
         else:
             raise NotImplementedError(
                 f"Could not find modality {modality} in default modality info."

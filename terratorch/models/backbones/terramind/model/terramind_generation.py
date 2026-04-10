@@ -267,8 +267,32 @@ class TerraMindGeneration(nn.Module):
 
         # Define the initial input
         input_dict = {}
-        # Default values if no images are provided
-        img_num_tokens, image_size = 196, (224, 224)
+
+        # Derive default values from first output image modality configuration
+        default_mod = next((mod for mod in self.output_modalities if mod in self.output_image_modalities), None)
+
+        if default_mod and default_mod in self.decoder_embeddings:
+            decoder_emb = self.decoder_embeddings[default_mod]
+
+            # Use getattr with defaults for safer attribute access
+            img_num_tokens = getattr(decoder_emb, 'num_patches', 196)
+            image_size = getattr(decoder_emb, 'image_size', (224, 224))
+            num_codebooks = getattr(decoder_emb, 'num_codebooks', 128)
+
+            # Log warning only if any attribute was missing
+            if not all(hasattr(decoder_emb, attr) for attr in ['num_patches', 'image_size', 'num_codebooks']):
+                warnings.warn(
+                    f"Decoder embedding for '{default_mod}' missing some attributes. "
+                    f"Using defaults: num_patches={img_num_tokens}, image_size={image_size}, num_codebooks={num_codebooks}"
+                )
+        else:
+            # No output image modalities configured
+            img_num_tokens, image_size, num_codebooks = 196, (224, 224), 128
+            if default_mod:
+                warnings.warn(
+                    f"Output image modality '{default_mod}' not found in decoder embeddings. Using default values."
+                )
+
         for mod, value in d.items():
             if self.mod_name_mapping[mod] in self.image_modalities:
                 input_shape = value.shape
@@ -321,7 +345,7 @@ class TerraMindGeneration(nn.Module):
                 # Modality in input and target
                 input_dict[mod] = init_conditioned_target_modality(input_dict[mod], MODALITY_INFO, mod, mod_num_tokens)
             else:
-                input_dict[mod] = init_empty_target_modality(MODALITY_INFO, mod, batch_size, mod_num_tokens, device)
+                input_dict[mod] = init_empty_target_modality(MODALITY_INFO, mod, batch_size, mod_num_tokens, num_codebooks, device)
 
         # Predict tokens of output modalities
         schedule = build_chained_generation_schedules(
@@ -341,7 +365,7 @@ class TerraMindGeneration(nn.Module):
         out_dict = self.sampler.generate(
             input_dict,
             schedule,
-            verbose=False,
+            verbose=verbose,
             seed=random.randint(-(2**31), 2**31 - 1),
             top_p=self.top_p,
             top_k=self.top_k,
@@ -352,27 +376,38 @@ class TerraMindGeneration(nn.Module):
         # TODO Vary timesteps based on codebook diversity
         timesteps = timesteps or self.timesteps
         out = {}
+        
         for mod in self.output_modalities:
             tok = out_dict[mod]["tensor"]
             if mod in self.output_image_modalities:
                 patch_size = self.tokenizer[mod].patch_size
-                tok = rearrange(
-                    tok, "b (nh nw) -> b nh nw", nh=image_size[0] // patch_size, nw=image_size[1] // patch_size
-                )
 
-                out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
-                    tok, image_size=image_size, timesteps=timesteps, verbose=verbose
-                )
+                if num_codebooks == 1:
+                    tok = rearrange(
+                        tok, "b (nh nw) -> b nh nw", nh=image_size[0] // patch_size, nw=image_size[1] // patch_size
+                    )
+
+                    out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
+                        tok, image_size=image_size, timesteps=timesteps, verbose=verbose
+                    )
+                else:
+                    tok = rearrange(
+                        tok, "b (nh nw) c -> b nh nw c", nh=image_size[0] // patch_size, nw=image_size[1] // patch_size, c=num_codebooks
+                    )
+
+                    out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_tokens(
+                        tok, image_size=image_size, timesteps=timesteps, verbose=verbose
+                    )
 
             elif mod in self.output_modalities and mod in ["caption", "coords"]:
                 out[self.output_mod_name_mapping[mod]] = self.tokenizer[mod].decode_text(out_dict)
 
-        if standardize:
-            for mod, value in out.items():
-                if self.mod_name_mapping[mod] in self.pretraining_mean:
-                    out[mod] = (
-                        value * self.pretraining_std[self.mod_name_mapping[mod]]
-                        + self.pretraining_mean[self.mod_name_mapping[mod]]
-                    )
+        # if standardize:
+        #     for mod, value in out.items():
+        #         if self.mod_name_mapping[mod] in self.pretraining_mean:
+        #             out[mod] = (
+        #                 value * self.pretraining_std[self.mod_name_mapping[mod]]
+        #                 + self.pretraining_mean[self.mod_name_mapping[mod]]
+        #             )
 
         return out
